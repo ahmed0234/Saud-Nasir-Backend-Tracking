@@ -4,14 +4,17 @@
 	import DateRangeFilter from '#lib/components/dashboard/date-range-filter.svelte';
 	import PageHeader from '#lib/components/dashboard/page-header.svelte';
 	import RankedList from '#lib/components/dashboard/ranked-list.svelte';
+	import SiteBadge from '#lib/components/dashboard/site-badge.svelte';
 	import StatCard from '#lib/components/dashboard/stat-card.svelte';
 	import StateMessage from '#lib/components/dashboard/state-message.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { PRESETS, toLocalIsoDate } from '#lib/date-range.ts';
 	import { formatDateTime, formatNumber, formatPercent, splitUrl } from '#lib/format.ts';
+	import { buttonTypeLabel, EVENT_TYPE_LABELS, getSite, isEventType } from '#lib/sites.ts';
 	import { cn } from '#lib/utils.js';
 	import ArrowDownRightIcon from '@lucide/svelte/icons/arrow-down-right';
 	import ArrowUpRightIcon from '@lucide/svelte/icons/arrow-up-right';
+	import ClipboardListIcon from '@lucide/svelte/icons/clipboard-list';
 	import FileTextIcon from '@lucide/svelte/icons/file-text';
 	import InboxIcon from '@lucide/svelte/icons/inbox';
 	import InfoIcon from '@lucide/svelte/icons/info';
@@ -21,7 +24,6 @@
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import ServerCrashIcon from '@lucide/svelte/icons/server-crash';
-	import TargetIcon from '@lucide/svelte/icons/target';
 	import { refreshAll } from '$app/navigation';
 	import { navigating } from '$app/state';
 	import type { PageProps } from './$types';
@@ -31,7 +33,9 @@
 	let refreshing = $state(false);
 	const loading = $derived(refreshing || navigating.to?.route.id === '/analytics');
 
+	const site = $derived(getSite(data.site));
 	const analytics = $derived(data.analytics);
+	const eventLabel = (value: string) => (isEventType(value) ? EVENT_TYPE_LABELS[value] : value);
 	const summary = $derived(analytics?.summary);
 	const rangeLabel = $derived(
 		data.range.key === 'custom'
@@ -60,18 +64,23 @@
 </script>
 
 <svelte:head>
-	<title>Analytics · CTA Tracking</title>
+	<title>{site ? `${site.name} · ` : ''}Analytics · Lead Tracking</title>
 </svelte:head>
 
 <div class="space-y-8">
 	<PageHeader
-		title="Analytics"
-		description="Trends, locations and top pages for CTA clicks in the selected period."
+		title={site?.name ?? 'All websites'}
+		description="Trends, lead types, locations and top pages for leads in the selected period."
 	>
+		{#snippet eyebrow()}
+			<span class="font-medium tracking-wider uppercase">Analytics</span>
+			<SiteBadge siteId={data.site} />
+		{/snippet}
 		{#snippet actions()}
 			<DateRangeFilter
 				range={data.range}
 				today={toLocalIsoDate(new Date(), data.timeZone)}
+				site={data.site}
 				disabled={loading}
 			/>
 			<Button
@@ -125,11 +134,11 @@
 			class={cn('space-y-6 transition-opacity duration-300', loading && 'opacity-50')}
 			aria-busy={loading}
 		>
-			<div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-				<StatCard label="Clicks" value={formatNumber(summary.total)} icon={MousePointerClickIcon}>
+			<div class="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+				<StatCard label="Leads" value={formatNumber(summary.total)} icon={MousePointerClickIcon}>
 					{#snippet hint()}
 						{#if delta === null}
-							No clicks in the previous period
+							No leads in the previous period
 						{:else}
 							<span class="inline-flex items-center gap-1">
 								{#if delta > 0}<ArrowUpRightIcon
@@ -146,21 +155,22 @@
 					{/snippet}
 				</StatCard>
 				<StatCard
-					label="Pages with clicks"
+					label="Form submissions"
+					value={formatNumber(summary.formSubmissions)}
+					icon={ClipboardListIcon}
+				>
+					{#snippet hint()}{formatNumber(summary.ctaClicks)} CTA clicks in {rangeLabel}{/snippet}
+				</StatCard>
+				<StatCard
+					label="Pages with leads"
 					value={formatNumber(summary.uniquePages)}
 					icon={FileTextIcon}
 				>
 					{#snippet hint()}Unique page URLs in {rangeLabel}{/snippet}
 				</StatCard>
 				<StatCard label="Locations" value={formatNumber(summary.uniqueLocations)} icon={MapPinIcon}>
-					{#snippet hint()}Distinct city and state pairs{/snippet}
-				</StatCard>
-				<StatCard
-					label="Located clicks"
-					value={formatPercent(summary.locatedShare)}
-					icon={TargetIcon}
-				>
-					{#snippet hint()}Clicks with a known city or state{/snippet}
+					{#snippet hint()}Distinct city and state pairs · {formatPercent(summary.locatedShare)} of leads
+						located{/snippet}
 				</StatCard>
 			</div>
 
@@ -168,40 +178,96 @@
 				<div class="rounded-2xl glass">
 					<StateMessage
 						icon={InboxIcon}
-						title="No clicks in this period"
-						description="Choose a wider date range, or check back once your website records CTA clicks."
+						title={site ? `No leads from ${site.name} in this period` : 'No leads in this period'}
+						description="Choose a wider date range, or check back once the website records leads."
 					/>
 				</div>
 			{:else}
 				<div class="grid gap-6 lg:grid-cols-2">
 					<section class="rounded-2xl glass p-5" aria-labelledby="timeline-heading">
 						<header class="mb-4 space-y-1">
-							<h2 id="timeline-heading" class="font-medium">Clicks over time</h2>
+							<h2 id="timeline-heading" class="font-medium">Leads over time</h2>
 							<p class="text-sm text-muted-foreground">
-								{analytics.timeline.unit === 'hour' ? 'Hourly' : 'Daily'} clicks in {rangeLabel}
+								{analytics.timeline.unit === 'hour' ? 'Hourly' : 'Daily'} leads in {rangeLabel}
 							</p>
 						</header>
 						<ClicksAreaChart
 							buckets={analytics.timeline.buckets}
 							unit={analytics.timeline.unit}
+							color={site?.accent}
 							timeZone={data.timeZone}
 						/>
 					</section>
 					<section class="rounded-2xl glass p-5" aria-labelledby="daily-heading">
 						<header class="mb-4 space-y-1">
-							<h2 id="daily-heading" class="font-medium">Clicks by day</h2>
+							<h2 id="daily-heading" class="font-medium">Leads by day</h2>
 							<p class="text-sm text-muted-foreground">
-								Total clicks per calendar day ({data.timeZone})
+								Total leads per calendar day ({data.timeZone})
 							</p>
 						</header>
-						<ClicksBarChart buckets={analytics.daily} timeZone={data.timeZone} />
+						<ClicksBarChart
+							buckets={analytics.daily}
+							timeZone={data.timeZone}
+							color={site?.accent}
+						/>
 					</section>
 				</div>
 
 				<div class="grid gap-6 lg:grid-cols-2">
 					<RankedList
+						title="Lead types"
+						description="CTA clicks and form submissions by what was clicked"
+						items={analytics.types.map((row) => ({
+							...row,
+							key: `${row.eventType}|${row.buttonType}`
+						}))}
+						total={summary.total}
+					>
+						{#snippet label(item)}
+							<span class="font-medium">{buttonTypeLabel(item.buttonType) ?? 'Not recorded'}</span>
+							<span class="text-muted-foreground"> · {eventLabel(item.eventType)}</span>
+						{/snippet}
+					</RankedList>
+					<RankedList
+						title="Top buttons"
+						description="Most used CTA and form submit buttons, by label"
+						items={analytics.buttons.map((row) => ({
+							...row,
+							key: `${row.eventType}|${row.label}`
+						}))}
+						total={summary.total}
+					>
+						{#snippet label(item)}
+							<span class="font-medium">{item.label}</span>
+							<span class="text-muted-foreground"> · {eventLabel(item.eventType)}</span>
+						{/snippet}
+					</RankedList>
+				</div>
+
+				{#if !site}
+					<RankedList
+						title="Leads by website"
+						description="Which website each lead came from"
+						items={analytics.sites.map((row) => ({ ...row, key: row.site ?? 'other' }))}
+						total={summary.total}
+					>
+						{#snippet label(item)}
+							{@const itemSite = getSite(item.site)}
+							<span class="inline-flex items-center gap-2 font-medium">
+								<span
+									class="size-2 rounded-full"
+									style:background-color={itemSite?.accent ?? 'var(--muted-foreground)'}
+								></span>
+								{itemSite?.name ?? 'Other domains'}
+							</span>
+						{/snippet}
+					</RankedList>
+				{/if}
+
+				<div class="grid gap-6 lg:grid-cols-2">
+					<RankedList
 						title="Top cities"
-						description="Where clicks came from, by city and state"
+						description="Where leads came from, by city and state"
 						items={analytics.cities.map((row) => ({ ...row, key: `${row.label}|${row.detail}` }))}
 						total={summary.total}
 					>
@@ -212,7 +278,7 @@
 					</RankedList>
 					<RankedList
 						title="Top states"
-						description="Clicks grouped by state or region"
+						description="Leads grouped by state or region"
 						items={analytics.states.map((row) => ({ ...row, key: row.label }))}
 						total={summary.total}
 					>
@@ -224,7 +290,7 @@
 
 				<RankedList
 					title="Top pages"
-					description="WordPress pages generating the most CTA clicks"
+					description="WordPress pages generating the most leads"
 					items={analytics.pages.map((row) => ({ ...row, key: row.label }))}
 					total={summary.total}
 				>

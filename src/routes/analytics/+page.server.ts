@@ -7,6 +7,7 @@ import {
 	type RangeKey
 } from '#lib/date-range.ts';
 import { getRangeAnalytics, localDayBounds } from '#lib/server/analytics.ts';
+import { siteFromUrl } from '#lib/sites.ts';
 import { resolveTimeZone, TIME_ZONE_COOKIE } from '#lib/timezone.ts';
 import type { PageServerLoad } from './$types';
 
@@ -15,6 +16,7 @@ const DAY_MS = 24 * 60 * 60_000;
 export const load: PageServerLoad = async ({ url, cookies, setHeaders }) => {
 	setHeaders({ 'cache-control': 'no-store' });
 	const timeZone = resolveTimeZone(cookies.get(TIME_ZONE_COOKIE));
+	const site = siteFromUrl(url);
 	const now = new Date();
 
 	let key: RangeKey = DEFAULT_RANGE;
@@ -48,6 +50,7 @@ export const load: PageServerLoad = async ({ url, cookies, setHeaders }) => {
 		}
 
 		return {
+			site,
 			range: {
 				key,
 				start: start.toISOString(),
@@ -55,13 +58,14 @@ export const load: PageServerLoad = async ({ url, cookies, setHeaders }) => {
 				from: key === 'custom' ? from! : toLocalIsoDate(start, timeZone),
 				to: key === 'custom' ? to! : toLocalIsoDate(now, timeZone)
 			},
-			analytics: await getRangeAnalytics(start, end, timeZone),
+			analytics: await getRangeAnalytics(start, end, timeZone, site),
 			notice,
 			error: null
 		};
 	} catch (error) {
 		console.error('Failed to load analytics', error);
 		return {
+			site,
 			range: {
 				key,
 				start: null,

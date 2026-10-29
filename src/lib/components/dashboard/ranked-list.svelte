@@ -32,7 +32,7 @@
 	{#if items.length === 0}
 		<StateMessage
 			icon={InboxIcon}
-			title="No clicks in this range"
+			title="No leads in this range"
 			description="Try a wider date range."
 			class="py-10"
 		/>

@@ -4,52 +4,55 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-One central backend that tracks CTA clicks (leads) from **three WordPress websites**. Each site runs the same global JavaScript snippet; when a visitor clicks a phone or booking CTA, the snippet POSTs to this backend, which stores the click in Neon Postgres, emails a notification, and shows everything in a read-only analytics dashboard (`/` and `/analytics`). It is not a CRM. Opening the dashboard must never create events or send email.
+One central backend that tracks leads from **three WordPress websites** (Platinum SG, Clean Master, EMG Air). Each site runs its own copy of a global JavaScript snippet that sends the site's identifier; when a visitor clicks a CTA (phone, booking, email/SMS, Elementor button) or submits a lead form, the snippet POSTs to this backend, which stores it in Neon Postgres, emails a notification, and shows everything in a read-only analytics dashboard (`/` and `/analytics`, filterable per website from the sidebar). It is not a CRM. Opening the dashboard must never create events or send email.
 
 ```
 WordPress site A ─┐
-WordPress site B ─┼─ cta-click-tracker.js ──POST /api/cta-click──▶ SvelteKit on Vercel ──▶ Neon Postgres (cta_clicks)
+WordPress site B ─┼─ <site>-tracker.js ─────POST /api/cta-click──▶ SvelteKit on Vercel ──▶ Neon Postgres (cta_clicks)
 WordPress site C ─┘   (fetch keepalive, text/plain)                     │                        ▲
                                                                         └─▶ Gmail SMTP email      └── dashboard / , /analytics
 ```
 
 - **Production backend:** `https://fluxpoint-omega.vercel.app` (endpoint `https://fluxpoint-omega.vercel.app/api/cta-click`). Deployed by the user; we never deploy.
-- **Which site a click came from** is only identifiable from the stored `page_url` host. There is no `site` column and no CTA type (call vs booking) column; the snippet sends only `pageUrl` and `clickedAt`.
-- **"Leads" = CTA clicks only.** Form submissions on the WordPress sites are not tracked.
+- **Sites** are defined once in `src/lib/sites.ts` (`platinum-sg`, `clean-master`, `emg-air`: name, URL, hosts, dashboard accent). Never rename an id once leads are stored with it.
+- **Each lead row** (`cta_clicks`) stores `site`, `event_type` (`cta_click` | `form_submit`), `button_type` (call, sms, email, booking, button, elementor_form, fluent_form, cf7_form, wpforms_form, gravity_form, form, or a `data-cta` value), `button_text`, `form_name`, `page_url`, a generated `page_path` (route), city/state and `clicked_at`. Rows recorded before migration 0001 have null button fields; `site` is null for domains outside the three sites (2 old Ridgewell rows).
+- **Site resolution in the API:** a production host listed in `sites.ts` decides the site (a snippet pasted on the wrong site can't mislabel leads); otherwise the snippet's `site` id is used (staging domains). Old payloads without `site` still work.
 
 ### The WordPress sites
 
 Every site's exact origin (scheme + host as the browser sends it, after redirects) must be in `CORS_ALLOWED_ORIGINS` in **Vercel** (build and runtime), then redeploy. `.env.example` is only a template and is never read at runtime.
 
-| Site                         | Origin to allow                                                                                                                                                       | Status (as of 2026-10-29)                                                                                                                                         |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Clean Master Carpet Cleaning | `https://www.cleanmastercarpetcleaning.com` (non-www 301s to www)                                                                                                     | Allowed in production (verified live). Snippet installed via WPCode.                                                                                              |
-| Ridgewell Colorado           | `https://ridgewellcolorado.com` (www and http 301 to it)                                                                                                              | Allowed in production (verified live). Snippet installed; the `ERR_BLOCKED_BY_CLIENT` issue was fixed by the fetch-first snippet change; user confirmed it works. |
-| Third site                   | **Unconfirmed.** `https://olivedrab-shark-268292.hostingersite.com` (a Hostinger temp domain) is in `.env`/`.env.example`, possibly the third site or its staging URL | Not verified. Confirm the real domain, add its exact origin in Vercel, redeploy, install the snippet.                                                             |
+| Site         | Snippet                                          | Origin to allow (verified 2026-10-29)                             | Lead forms                              |
+| ------------ | ------------------------------------------------ | ----------------------------------------------------------------- | --------------------------------------- |
+| Platinum SG  | `code-snippet-wordpress/platinum-sg-tracker.js`  | `https://www.platinumsg.com` (non-www 301s to www)                | Elementor Pro form (contact page)       |
+| Clean Master | `code-snippet-wordpress/clean-master-tracker.js` | `https://www.cleanmastercarpetcleaning.com` (non-www 301s to www) | CTAs are `tel:` and Housecall Pro links |
+| EMG Air      | `code-snippet-wordpress/emg-air-tracker.js`      | `https://www.emgair.com` (non-www 301s to www)                    | Fluent Forms (not Elementor)            |
 
-The `.env` list also contains a bare `ridgewellcolorado.com` (no scheme). It never matches a browser origin; harmless but useless.
+Platinum SG's homepage is a static HTML page (not WordPress), so a WPCode snippet does not run there; its other pages are WordPress + Elementor. Ridgewell Colorado (`https://ridgewellcolorado.com`) was an earlier site; its old rows remain with `site = null`.
 
-### The WordPress snippet (`code-snippet-wordpress/cta-click-tracker.js`)
+### The WordPress snippets (`code-snippet-wordpress/<site>-tracker.js`)
 
-The same file goes on every site (WPCode → JavaScript Snippet → Site Wide Footer → Active). Plain browser JS; it is linted by the project config.
+One file per site, identical except for `var SITE = '...'` and the header; keep them in sync when changing tracking logic. Installed via WPCode → JavaScript Snippet → Site Wide Footer → Active, replacing the old `cta-click-tracker.js` (same `window.__cmCtaTracker` guard, so an old and a new copy never both send). Plain browser JS, linted by the project config.
 
-- **Detection is by link destination, not text or CSS:** `href^="tel:"` → call; `*.housecallpro.com` link, `hcp-button` class or `HCPWidget` onclick → booking; `data-cta="..."` opts any element in; `data-cta-ignore` opts out. One capture-phase `click` listener on `document` (+ middle-click `auxclick`), so it covers Elementor widgets, popups and late-loaded content. On 12 Clean Master pages every CTA was a `tel:` or `book.housecallpro.com` link (no "Call Us Now" text buttons, no HCP widget).
-- **Never interferes:** no `preventDefault`/`stopPropagation`; dialer, Housecall Pro and the LeadConnector chat link (a `tel:` link whose onclick opens chat; it is tracked as a call) behave as before.
-- **Transport:** `fetch(..., { keepalive: true })` with a `text/plain` JSON body (no CORS preflight, survives navigation). `navigator.sendBeacon` is only a fallback: browsers type beacons as `ping`, and EasyPrivacy's `*$ping,third-party` rule (default in uBlock Origin, AdBlock, AdGuard, Brave) blocks them → `net::ERR_BLOCKED_BY_CLIENT`. Don't switch back to sendBeacon-first. Blockers set to block all third-party requests can still block it; the only full fix would be a first-party proxy on each WordPress domain (not built).
-- Skips the Elementor editor (`?elementor-preview=`) and `/wp-admin/`; dedupes repeat clicks on the same element within 1s; guards against double inclusion.
-- **Debug:** add `?cta_debug=1` to a page URL; the console logs `call click sent via fetch`.
+- **CTA clicks** (`eventType: 'cta_click'`) are detected by destination, not text: `tel:` → call, `sms:` → sms, `mailto:` → email, `*.housecallpro.com` / `hcp-button` / `HCPWidget` → booking, Elementor and add-on button widgets (`.elementor-button`, CTA/price table/flip box/slides buttons, ElementsKit, Essential Addons, Premium Addons, Royal Addons) → button. `data-cta="name"` opts in, `data-cta-ignore` opts out. Buttons inside forms (multi-step Next/Previous) are not CTAs. The same element within 1s is deduped.
+- **Form submissions** (`eventType: 'form_submit'`) are recorded on the `submit` event (submit button click, Enter, mobile "Go"), plus a fallback after a submit-button click for plugins that cancel the click and send via AJAX. Only filled-in forms count: HTML validity plus `aria-required="true"` fields (how Fluent Forms marks required fields). One record per form per 3s. Search, login, comment and WooCommerce forms are skipped. Field values are never sent, only the submit button label and the form name.
+- One capture-phase `click` + `submit` listener on `document` (+ middle-click `auxclick`); never `preventDefault`/`stopPropagation`.
+- **Transport:** `fetch(..., { keepalive: true })` with a `text/plain` JSON body (no CORS preflight, survives navigation). `navigator.sendBeacon` is only a fallback: browsers type beacons as `ping`, and EasyPrivacy's `*$ping,third-party` rule blocks them → `net::ERR_BLOCKED_BY_CLIENT`. Don't switch back to sendBeacon-first.
+- Skips the Elementor editor (`?elementor-preview=`) and `/wp-admin/`. **Debug:** `?cta_debug=1` logs e.g. `elementor_form submission sent via fetch`.
 - Caching/optimization plugins must not delay it (exclude from WP Rocket/LiteSpeed "delay JS"); clear caches after updating it.
+- Verified 2026-10-29 in headless Chrome (desktop and iPhone emulation) against saved copies of the real Platinum SG contact page, EMG Air contact page and Clean Master homepage.
 
 ### Status (as of 2026-10-29)
 
 **Verified working:** live DB schema matches Drizzle (1 migration applied); end-to-end click → row → dashboard/analytics in a production build; CORS + CSRF behavior on the live endpoint for both allowed origins; Gmail sending locally and in a production build; test-email button; rate limiting; security headers deployed; snippet detection against the real Clean Master pages (simulated browser); user confirmed tracking works on the live sites.
 
+**Pending deploy steps for multi-site + form tracking:** run `bun run db:migrate` (migration `0001_add_site_and_lead_type`; additive and safe for the currently deployed code), set `CORS_ALLOWED_ORIGINS` in Vercel to include all three origins, redeploy, then install the three snippets.
+
 **Open items / not yet verified:**
 
 - **No authentication.** Clerk is not integrated at all (no package, code or env vars). The dashboard and test-email button are public to anyone with the URL. Needs Clerk (user must create a Clerk app and provide keys) or Vercel Deployment Protection.
-- Third WordPress site: domain, origin and snippet install (see table).
 - Gmail delivery _from Vercel_ specifically (Google can block data-center logins; check for a security alert after the first production email).
-- Optional backend additions discussed but not built: CTA type (call/booking) column, `user_agent`/browser column (user-agent is already received, only emailed), first-party proxy for strict ad blockers, Vercel Firewall rate-limit rule.
+- Optional backend additions discussed but not built: `user_agent`/browser column (user-agent is already received, only emailed), first-party proxy for strict ad blockers, Vercel Firewall rate-limit rule.
 - The project is not a git repository yet. `.env.example` contains the user's real recipient address; replace it with a placeholder before pushing anywhere public.
 - Testing in this repo leaves rows in the shared production database. Label test clicks clearly (e.g. a `__audit-test__` path) and delete them afterwards; never mix fake data with real data.
 
@@ -87,14 +90,15 @@ These differ from older SvelteKit conventions, so don't assume SvelteKit 2 patte
 
 - **Env vars** are declared in `src/env.ts` with `defineEnvVars` (SvelteKit 3's replacement for `$env/*`) and imported from `$app/env/private`. `CORS_ALLOWED_ORIGINS` is parsed there into a `string[]`.
 - **Database:** Drizzle ORM over Neon's HTTP driver (`drizzle-orm/neon-http`). Client in `src/lib/server/db/index.ts`, schema in `src/lib/server/db/schema.ts`. Drizzle Kit owns migrations in `drizzle/` (excluded from Prettier). Don't introduce Prisma.
-- **Endpoint:** `POST /api/cta-click` (`src/routes/api/cta-click/+server.ts`) accepts `{ pageUrl, city?, state?, clickedAt? }`. `pageUrl`'s origin must be in `CORS_ALLOWED_ORIGINS`. Missing city/state fall back to edge geo headers (`src/lib/server/geo.ts`: Vercel `x-vercel-ip-*`, Cloudflare `cf-*` fallback); a missing or implausible `clickedAt` falls back to server time. The body is parsed as JSON regardless of content type, so the snippet's `text/plain` requests (no CORS preflight) work; replies 204 on success, 400/403/405/413/429 otherwise.
+- **Endpoint:** `POST /api/cta-click` (`src/routes/api/cta-click/+server.ts`) accepts `{ site?, eventType?, buttonType?, buttonText?, formName?, pageUrl, city?, state?, clickedAt? }`. `pageUrl`'s origin must be in `CORS_ALLOWED_ORIGINS`. Missing city/state fall back to edge geo headers (`src/lib/server/geo.ts`: Vercel `x-vercel-ip-*`, Cloudflare `cf-*` fallback); a missing or implausible `clickedAt` falls back to server time. The body is parsed as JSON regardless of content type, so the snippet's `text/plain` requests (no CORS preflight) work; replies 204 on success, 400/403/405/413/429 otherwise.
 - **Email:** after the insert, the endpoint returns 204 and sends a notification via `waitUntil` from `@vercel/functions` (a no-op outside Vercel). `src/lib/server/email/index.ts` sends through Gmail SMTP (Nodemailer 10, which ships its own types) and never throws; on Gmail quota/rate-limit/auth errors it pauses sending per instance. The HTML template lives in `src/lib/server/email/cta-click-email.ts` and must escape every interpolated value.
 - **Production hardening:** `src/hooks.server.ts` sets security headers (nosniff, `X-Frame-Options: DENY`, `X-Robots-Tag: noindex`); `/api/cta-click` is rate limited per client IP (`src/lib/server/rate-limit.ts`, in-memory, per instance, best-effort); the `sendTestEmail` action only accepts same-origin requests. `vite.config.ts` sets `maxDuration: 60` on the Vercel function and fails the build if `CORS_ALLOWED_ORIGINS` is empty. `package.json` requires Node ≥ 22.17 (SvelteKit 3) and overrides `zod` to a patched version.
 - **CORS/CSRF coupling:** SvelteKit's CSRF check rejects cross-origin text/plain POSTs before hooks run, so `vite.config.ts` also feeds `CORS_ALLOWED_ORIGINS` into `csrf.trustedOrigins` at build time — changing allowed origins needs a redeploy. The CSRF check is skipped in dev.
-- **Dashboard:** server `load` functions (no client-side DB access) call `src/lib/server/analytics.ts`, which does all aggregation in Postgres. `/analytics` filters live in URL params (`range=24h|3d|7d|30d|custom&from&to`). Time-series buckets come from `generate_series`, so empty periods are zero. UI uses the shadcn-svelte components in `src/lib/components/ui`, layerchart 2 via `ui/chart`, and app components in `src/lib/components/dashboard`; the `glass` surface utility is defined in `layout.css`.
+- **Dashboard:** the root layout has a glass sidebar (`#lib/components/dashboard/app-sidebar.svelte`; a Sheet below `lg`) listing All websites + the three sites with all-time counts (`getSiteCounts` in `+layout.server.ts`). The selected site lives in the `site` URL param; every analytics query takes it (`null` = all). Server `load` functions (no client-side DB access) call `src/lib/server/analytics.ts`, which does all aggregation in Postgres. `/analytics` filters live in URL params (`range=24h|3d|7d|30d|custom&from&to`). Time-series buckets come from `generate_series`, so empty periods are zero. UI uses the shadcn-svelte components in `src/lib/components/ui`, layerchart 2 via `ui/chart`, and app components in `src/lib/components/dashboard`; the `glass` surface utility is defined in `layout.css`.
 - **Time zones:** timestamps are stored and sent as UTC ISO strings. `+layout.svelte` writes the browser's IANA zone to the `tz` cookie (`src/lib/timezone.ts`) and refreshes once; server loads use it for local-day boundaries (`AT TIME ZONE`) and pass `timeZone` to pages so server and client format dates identically. In SQL, parenthesize `x` in `x AT TIME ZONE tz` when `x` is an expression.
 - **Test email:** the `sendTestEmail` form action on `/` calls `sendTestEmail()` from the email module, throttled to one per 30s per instance.
 - **Browser info is not stored.** The schema has no browser/user-agent column; the endpoint only forwards the `User-Agent` header to the email.
+- `page_path` is a Postgres generated column (`generatedAlwaysAs` in the schema), so it can't drift from `page_url`.
 - SvelteKit 3: use `refreshAll` (not `invalidateAll`), `goto(url, { reset: false })` (not `noScroll`/`keepFocus`), and `resolve()` from `$app/paths` for internal links (ESLint enforces it; external WordPress links need an eslint-disable block).
 - `#lib/*` subpath imports need explicit file extensions (e.g. `#lib/server/geo.ts`).
 

@@ -134,3 +134,13 @@
 @utility glass {
 	@apply bg-card/55 shadow-[0_1px_0_0_inset] ring-1 shadow-white/5 ring-foreground/10 backdrop-blur-xl backdrop-saturate-150;
 }
+
+/* Indeterminate progress bar shown while a dashboard view loads. */
+@keyframes nav-progress {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		transform: translateX(300%);
+	}
+}

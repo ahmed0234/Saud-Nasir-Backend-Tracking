@@ -5,15 +5,18 @@
 
 	let {
 		buckets,
-		timeZone
+		timeZone,
+		color = 'var(--foreground)'
 	}: {
 		buckets: { start: string; clicks: number }[];
 		timeZone: string;
+		/** Series colour, e.g. the selected website's accent. */
+		color?: string;
 	} = $props();
 
-	const config = {
-		clicks: { label: 'Clicks', color: 'var(--foreground)' }
-	} satisfies Chart.ChartConfig;
+	const config = $derived({
+		clicks: { label: 'Leads', color }
+	} satisfies Chart.ChartConfig);
 
 	const data = $derived(buckets.map((bucket) => ({ day: bucket.start, clicks: bucket.clicks })));
 	// Keep bars slim when there are only a few days; show at most ~8 x-axis labels.
@@ -28,7 +31,7 @@
 	<BarChart
 		{data}
 		x="day"
-		series={[{ key: 'clicks', label: 'Clicks', color: 'var(--color-clicks)' }]}
+		series={[{ key: 'clicks', label: 'Leads', color: 'var(--color-clicks)' }]}
 		{bandPadding}
 		padding={{ left: 32, bottom: 24, top: 8, right: 8 }}
 		props={{

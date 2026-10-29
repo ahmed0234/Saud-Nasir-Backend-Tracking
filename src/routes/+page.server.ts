@@ -1,5 +1,6 @@
 import { getDashboard } from '#lib/server/analytics.ts';
 import { sendTestEmail } from '#lib/server/email/index.ts';
+import { siteFromUrl } from '#lib/sites.ts';
 import { resolveTimeZone, TIME_ZONE_COOKIE } from '#lib/timezone.ts';
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -9,15 +10,16 @@ import type { Actions, PageServerLoad } from './$types';
 const TEST_EMAIL_COOLDOWN_MS = 30_000;
 let lastTestEmailAt = 0;
 
-export const load: PageServerLoad = async ({ cookies, setHeaders }) => {
+export const load: PageServerLoad = async ({ url, cookies, setHeaders }) => {
 	setHeaders({ 'cache-control': 'no-store' });
 	const timeZone = resolveTimeZone(cookies.get(TIME_ZONE_COOKIE));
+	const site = siteFromUrl(url);
 
 	try {
-		return { dashboard: await getDashboard(timeZone), error: null };
+		return { site, dashboard: await getDashboard(timeZone, site), error: null };
 	} catch (error) {
 		console.error('Failed to load dashboard', error);
-		return { dashboard: null, error: 'Could not load tracking data from the database.' };
+		return { site, dashboard: null, error: 'Could not load tracking data from the database.' };
 	}
 };
 

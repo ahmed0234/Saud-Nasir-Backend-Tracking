@@ -1,8 +1,18 @@
+import { buttonTypeLabel, EVENT_TYPE_LABELS, getSite, isEventType } from '#lib/sites.ts';
 import type { CtaClick } from '../db/schema.ts';
 
 export type CtaClickEmailDetails = Pick<
 	CtaClick,
-	'id' | 'pageUrl' | 'city' | 'state' | 'clickedAt'
+	| 'id'
+	| 'site'
+	| 'eventType'
+	| 'buttonType'
+	| 'buttonText'
+	| 'formName'
+	| 'pageUrl'
+	| 'city'
+	| 'state'
+	| 'clickedAt'
 > & {
 	country: string | null;
 	userAgent: string | null;
@@ -31,18 +41,27 @@ export function renderCtaClickEmail(click: CtaClickEmailDetails, { test = false 
 	const path = decodeSafe(url.pathname + url.search) || '/';
 	const location = [click.city, click.state].filter(Boolean).join(', ');
 	const clickedAtUtc = `${utcFormatter.format(click.clickedAt)} UTC`;
-	const heading = test ? 'Test notification' : 'New CTA click recorded';
+	const isForm = click.eventType === 'form_submit';
+	const leadType = isEventType(click.eventType) ? EVENT_TYPE_LABELS[click.eventType] : 'CTA click';
+	const siteName = getSite(click.site)?.name ?? url.host;
+	const button = [buttonTypeLabel(click.buttonType), click.buttonText && `"${click.buttonText}"`]
+		.filter(Boolean)
+		.join(' · ');
+	const heading = test ? 'Test notification' : `New ${leadType.toLowerCase()} recorded`;
 	const footnote = test
 		? 'This is a test email sent from the dashboard. The details above are sample data; no click was recorded.'
 		: "Location comes from your website or, when it isn't sent, from the visitor's IP address, so it may be approximate.";
 
 	const subject = singleLine(
-		`${test ? '[Test] ' : ''}New CTA click: ${path}${location ? ` · ${location}` : ''}`
+		`${test ? '[Test] ' : ''}New ${leadType.toLowerCase()} · ${siteName}: ${path}${location ? ` · ${location}` : ''}`
 	);
 
 	const rows: Row[] = [
 		{ label: 'Page URL', value: click.pageUrl, href: click.pageUrl },
-		{ label: 'Website', value: url.host },
+		{ label: 'Website', value: `${siteName} (${url.host})` },
+		{ label: 'Lead type', value: leadType },
+		{ label: isForm ? 'Submit button' : 'Button', value: button || NOT_AVAILABLE },
+		...(isForm ? [{ label: 'Form', value: click.formName ?? NOT_AVAILABLE }] : []),
 		{ label: 'Page path', value: path },
 		{ label: 'City', value: click.city ?? NOT_AVAILABLE },
 		{ label: 'State / region', value: click.state ?? NOT_AVAILABLE },
@@ -74,7 +93,7 @@ export function renderCtaClickEmail(click: CtaClickEmailDetails, { test = false 
 <h1 style="margin:0;font-family:${FONT};font-size:22px;line-height:1.3;font-weight:700;color:#ffffff;">${heading}</h1>
 </td></tr>
 <tr><td style="padding:28px 32px 8px;">
-<p style="margin:0 0 4px;font-family:${FONT};font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#6b6b6b;">Clicked on</p>
+<p style="margin:0 0 4px;font-family:${FONT};font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#6b6b6b;">${escapeHtml(isForm ? `Form submitted on ${siteName}` : `Clicked on ${siteName}`)}</p>
 <p style="margin:0 0 4px;font-family:${FONT};font-size:18px;line-height:1.4;font-weight:600;color:#111111;word-break:break-word;">${escapeHtml(path)}</p>
 <p style="margin:0;font-family:${FONT};font-size:14px;line-height:1.5;color:#4a4a4a;">${escapeHtml(location || 'Location not available')} &middot; ${escapeHtml(clickedAtUtc)}</p>
 </td></tr>

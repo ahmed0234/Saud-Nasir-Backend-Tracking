@@ -105,6 +105,11 @@ export async function sendTestEmail(): Promise<DeliveryResult> {
 	return deliver(
 		{
 			id: crypto.randomUUID(),
+			site: null,
+			eventType: 'cta_click',
+			buttonType: 'call',
+			buttonText: 'Call Now',
+			formName: null,
 			pageUrl: `${site}/sample-page/`,
 			city: 'Austin',
 			state: 'TX',

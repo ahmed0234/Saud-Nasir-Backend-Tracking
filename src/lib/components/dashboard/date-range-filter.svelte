@@ -5,6 +5,7 @@
 	import * as Popover from '#lib/components/ui/popover/index.js';
 	import * as ToggleGroup from '#lib/components/ui/toggle-group/index.js';
 	import { MAX_CUSTOM_DAYS, PRESETS, type RangeKey } from '#lib/date-range.ts';
+	import { SITE_URL_PARAM } from '#lib/sites.ts';
 	import { cn } from '#lib/utils.js';
 	import CalendarRangeIcon from '@lucide/svelte/icons/calendar-range';
 	import { goto } from '$app/navigation';
@@ -13,11 +14,14 @@
 	let {
 		range,
 		today,
+		site,
 		disabled = false
 	}: {
 		range: { key: RangeKey; from: string; to: string };
 		/** Viewer's local date (YYYY-MM-DD), the latest selectable day. */
 		today: string;
+		/** Selected website, kept when the range changes. */
+		site: string | null;
 		disabled?: boolean;
 	} = $props();
 
@@ -39,7 +43,8 @@
 	);
 
 	function navigate(params: Record<string, string>) {
-		goto(resolve(`/analytics?${new URLSearchParams(params)}`), { reset: false });
+		const query = new URLSearchParams(site ? { [SITE_URL_PARAM]: site, ...params } : params);
+		goto(resolve(`/analytics?${query}`), { reset: false });
 	}
 
 	function onOpenChange(next: boolean) {

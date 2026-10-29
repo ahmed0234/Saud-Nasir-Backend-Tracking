@@ -6,16 +6,19 @@
 	let {
 		buckets,
 		unit,
-		timeZone
+		timeZone,
+		color = 'var(--foreground)'
 	}: {
 		buckets: { start: string; clicks: number }[];
 		unit: 'hour' | 'day';
 		timeZone: string;
+		/** Series colour, e.g. the selected website's accent. */
+		color?: string;
 	} = $props();
 
-	const config = {
-		clicks: { label: 'Clicks', color: 'var(--foreground)' }
-	} satisfies Chart.ChartConfig;
+	const config = $derived({
+		clicks: { label: 'Leads', color }
+	} satisfies Chart.ChartConfig);
 
 	const data = $derived(
 		buckets.map((bucket) => ({ date: new Date(bucket.start), clicks: bucket.clicks }))
@@ -28,7 +31,7 @@
 	<AreaChart
 		{data}
 		x="date"
-		series={[{ key: 'clicks', label: 'Clicks', color: 'var(--color-clicks)' }]}
+		series={[{ key: 'clicks', label: 'Leads', color: 'var(--color-clicks)' }]}
 		padding={{ left: 32, bottom: 24, top: 8, right: 8 }}
 		props={{
 			area: { fillOpacity: 0.1, line: { strokeWidth: 2 } },

@@ -3,6 +3,7 @@ import { ctaClicks } from '#lib/server/db/schema.ts';
 import { sendCtaClickNotification } from '#lib/server/email/index.ts';
 import { geoFromHeaders } from '#lib/server/geo.ts';
 import { createRateLimiter } from '#lib/server/rate-limit.ts';
+import { isEventType, isSiteId, siteForHost, type EventType, type SiteId } from '#lib/sites.ts';
 import { CORS_ALLOWED_ORIGINS } from '$app/env/private';
 import { waitUntil } from '@vercel/functions';
 import type { RequestHandler } from './$types';
@@ -10,6 +11,8 @@ import type { RequestHandler } from './$types';
 const MAX_BODY_BYTES = 4096;
 const MAX_URL_LENGTH = 2048;
 const MAX_PLACE_LENGTH = 120;
+const MAX_LABEL_LENGTH = 120;
+const BUTTON_TYPE_PATTERN = /^[a-z0-9_-]{1,40}$/;
 // Accept client timestamps only within this window around server time; outside it (bad device
 // clock, replayed request) the server's own time is used instead.
 const MAX_CLOCK_SKEW_PAST_MS = 24 * 60 * 60_000;
@@ -19,7 +22,17 @@ const MAX_CLOCK_SKEW_FUTURE_MS = 5 * 60_000;
 // visitor never clicks 30 CTAs a minute; a script hammering the endpoint does.
 const rateLimit = createRateLimiter({ limit: 30, windowMs: 60_000 });
 
-type ClickPayload = { pageUrl?: unknown; city?: unknown; state?: unknown; clickedAt?: unknown };
+type ClickPayload = {
+	site?: unknown;
+	eventType?: unknown;
+	buttonType?: unknown;
+	buttonText?: unknown;
+	formName?: unknown;
+	pageUrl?: unknown;
+	city?: unknown;
+	state?: unknown;
+	clickedAt?: unknown;
+};
 
 class ValidationError extends Error {}
 
@@ -43,7 +56,7 @@ function json(body: unknown, status: number, headers: Headers): Response {
 	return new Response(JSON.stringify(body), { status, headers });
 }
 
-function parsePageUrl(value: unknown): string {
+function parsePageUrl(value: unknown): URL {
 	if (typeof value !== 'string' || value.length === 0 || value.length > MAX_URL_LENGTH) {
 		throw new ValidationError('pageUrl must be an absolute http(s) URL');
 	}
@@ -60,7 +73,45 @@ function parsePageUrl(value: unknown): string {
 	if (!CORS_ALLOWED_ORIGINS.includes(url.origin)) {
 		throw new ValidationError('pageUrl must belong to an allowed site');
 	}
-	return url.href;
+	return url;
+}
+
+/**
+ * The page's domain decides the site when it is one of the configured production domains, so a
+ * snippet pasted on the wrong site can't mislabel leads. Otherwise (staging or temporary domains
+ * that are in CORS_ALLOWED_ORIGINS) the snippet's own identifier is used. Old snippets send none.
+ */
+function resolveSite(value: unknown, pageUrl: URL): SiteId | null {
+	if (value !== undefined && value !== null && !isSiteId(value)) {
+		throw new ValidationError('site must be a known site identifier');
+	}
+	const byHost = siteForHost(pageUrl.hostname);
+	if (byHost && value && byHost.id !== value) {
+		console.warn(`Snippet for "${value}" is running on ${pageUrl.host}; recording as ${byHost.id}`);
+	}
+	return byHost?.id ?? value ?? null;
+}
+
+function parseEventType(value: unknown): EventType {
+	if (value === undefined || value === null) return 'cta_click';
+	if (!isEventType(value)) throw new ValidationError('eventType must be cta_click or form_submit');
+	return value;
+}
+
+function parseButtonType(value: unknown): string | null {
+	if (value === undefined || value === null || value === '') return null;
+	const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+	if (!BUTTON_TYPE_PATTERN.test(normalized)) {
+		throw new ValidationError('buttonType must be 1-40 characters of a-z, 0-9, _ or -');
+	}
+	return normalized;
+}
+
+/** Free text from the page (button label, form name): collapsed to one line and truncated. */
+function parseLabel(value: unknown, field: string): string | null {
+	if (value === undefined || value === null) return null;
+	if (typeof value !== 'string') throw new ValidationError(`${field} must be a string`);
+	return value.replace(/\s+/g, ' ').trim().slice(0, MAX_LABEL_LENGTH) || null;
 }
 
 function parsePlace(value: unknown, field: string): string | null {
@@ -129,8 +180,14 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 	const geo = geoFromHeaders(request.headers);
 	let values: typeof ctaClicks.$inferInsert;
 	try {
+		const pageUrl = parsePageUrl(payload.pageUrl);
 		values = {
-			pageUrl: parsePageUrl(payload.pageUrl),
+			site: resolveSite(payload.site, pageUrl),
+			eventType: parseEventType(payload.eventType),
+			buttonType: parseButtonType(payload.buttonType),
+			buttonText: parseLabel(payload.buttonText, 'buttonText'),
+			formName: parseLabel(payload.formName, 'formName'),
+			pageUrl: pageUrl.href,
 			// Prefer what the site sent; fall back to the edge's IP-based location.
 			city: parsePlace(payload.city, 'city') ?? geo.city,
 			state: parsePlace(payload.state, 'state') ?? geo.state,
