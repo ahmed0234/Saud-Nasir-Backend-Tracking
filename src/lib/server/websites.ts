@@ -8,7 +8,7 @@ import {
 	type WebsitePlatform
 } from '#lib/sites.ts';
 import { db } from './db/index.ts';
-import { websiteDomains, websites } from './db/schema.ts';
+import { ctaClicks, websiteDomains, websites } from './db/schema.ts';
 
 // The registry of websites allowed to send leads, cached in memory per function instance.
 //
@@ -270,6 +270,30 @@ export async function setWebsiteDisabled(key: string, disabled: boolean): Promis
 	`);
 	invalidateWebsites();
 	if (result.rows.length === 0) throw new WebsiteError('That website no longer exists.');
+}
+
+/**
+ * Permanently deletes a website with all its leads (CTA clicks, form submissions and everything
+ * analytics and exports are computed from) and its domains. One statement, so it all goes or
+ * nothing does: the leads' foreign key is checked at the end of the statement, and domains go by
+ * ON DELETE CASCADE. Its site key stops working at once: the cache is cleared here, and other
+ * instances' caches can't let an event through because touchWebsite asks the database.
+ * Returns how many leads were deleted.
+ */
+export async function deleteWebsite(key: string): Promise<{ leads: number }> {
+	const result = await db.execute<{ key: string; leads: number }>(sql`
+		with deleted_leads as (
+			delete from ${ctaClicks} where ${ctaClicks.site} = ${key} returning 1
+		),
+		deleted_website as (
+			delete from ${websites} where key = ${key} returning key
+		)
+		select key, (select count(*) from deleted_leads)::int as leads from deleted_website
+	`);
+	invalidateWebsites();
+	const row = result.rows[0];
+	if (!row) throw new WebsiteError('That website was already deleted.');
+	return { leads: Number(row.leads) };
 }
 
 /** The website selected in the dashboard (`?site=`), if it exists; null means all websites. */

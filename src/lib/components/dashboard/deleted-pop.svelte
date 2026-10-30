@@ -1,14 +1,22 @@
 <script lang="ts" module>
 	// One pop at a time for the whole dashboard; showing a new one replays the animation.
-	let pop = $state<{ id: number; detail: string } | null>(null);
+	let pop = $state<{ id: number; title: string; detail: string } | null>(null);
 	let hideTimer: ReturnType<typeof setTimeout> | undefined;
 
-	/** Plays the centred "Deleted" confirmation after a successful delete. */
-	export function showDeleted(count: number) {
+	/**
+	 * Plays the centred "Deleted" confirmation after a successful delete: a lead count
+	 * ("3 leads removed") or a custom title and detail.
+	 */
+	export function showDeleted(what: number | { title: string; detail: string }) {
 		clearTimeout(hideTimer);
 		pop = {
 			id: (pop?.id ?? 0) + 1,
-			detail: `${count.toLocaleString('en-US')} ${count === 1 ? 'lead' : 'leads'} removed`
+			...(typeof what === 'number'
+				? {
+						title: 'Deleted',
+						detail: `${what.toLocaleString('en-US')} ${what === 1 ? 'lead' : 'leads'} removed`
+					}
+				: what)
 		};
 		hideTimer = setTimeout(() => (pop = null), 1700);
 	}
@@ -18,7 +26,9 @@
 	Mounted once in the (app) layout. CSS-only (transform/opacity, plus the check's stroke), never
 	blocks clicks, and only fades under prefers-reduced-motion.
 -->
-<div class="sr-only" role="status" aria-live="polite">{pop ? `Deleted. ${pop.detail}.` : ''}</div>
+<div class="sr-only" role="status" aria-live="polite">
+	{pop ? `${pop.title}. ${pop.detail}.` : ''}
+</div>
 
 {#if pop}
 	{#key pop.id}
@@ -46,7 +56,7 @@
 					</span>
 				</div>
 				<div class="text-center">
-					<p class="text-lg font-semibold tracking-tight">Deleted</p>
+					<p class="text-lg font-semibold tracking-tight">{pop.title}</p>
 					<p class="text-sm text-muted-foreground">{pop.detail}</p>
 				</div>
 			</div>

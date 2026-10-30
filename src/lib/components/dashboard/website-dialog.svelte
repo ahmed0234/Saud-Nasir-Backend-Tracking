@@ -21,10 +21,12 @@
 		findWebsite,
 		hostKey,
 		SITE_URL_PARAM,
+		siteFromUrl,
 		WEBSITE_PLATFORMS,
 		type Website,
 		type WebsitePlatform
 	} from '#lib/sites.ts';
+	import { formatNumber } from '#lib/format.ts';
 	import { cn } from '#lib/utils.js';
 	import ArrowRightIcon from '@lucide/svelte/icons/arrow-right';
 	import CircleCheckIcon from '@lucide/svelte/icons/circle-check';
@@ -33,6 +35,9 @@
 	import Loader2Icon from '@lucide/svelte/icons/loader-2';
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import PowerIcon from '@lucide/svelte/icons/power';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import TriangleAlertIcon from '@lucide/svelte/icons/triangle-alert';
+	import { showDeleted } from './deleted-pop.svelte';
 	import { enhance } from '$app/forms';
 	import { goto, refreshAll } from '$app/navigation';
 	import { resolve } from '$app/paths';
@@ -43,9 +48,9 @@
 	import InstallStatus from './install-status.svelte';
 
 	type FieldErrors = Partial<Record<'name' | 'domain' | 'extraDomains' | 'platform', string>>;
-	type Step = 'form' | 'install';
+	type Step = 'form' | 'install' | 'delete';
 
-	const action = (name: 'create' | 'update' | 'setDisabled') =>
+	const action = (name: 'create' | 'update' | 'setDisabled' | 'delete') =>
 		`${resolve('/(app)/websites')}?/${name}`;
 
 	let open = $state(false);
@@ -62,6 +67,8 @@
 	let message = $state<string | null>(null);
 	let saving = $state(false);
 	let confirmingDisable = $state(false);
+	// Delete confirmation: the website's name, typed again.
+	let confirmName = $state('');
 
 	const websites = $derived(page.data.websites ?? []);
 	const trackerOrigin = $derived(page.data.trackerOrigin ?? page.url.origin);
@@ -77,6 +84,8 @@
 		errors = {};
 		message = null;
 		confirmingDisable = false;
+		confirmName = '';
+		saving = false;
 		const existing = next.mode === 'create' ? undefined : findWebsite(websites, next.key);
 		if (next.mode !== 'create' && !existing) return;
 		fill(existing);
@@ -102,22 +111,156 @@
 	}
 
 	const title = $derived(
-		mode === 'create'
-			? step === 'form'
-				? 'Add a website'
-				: 'Install the tracking code'
-			: mode === 'edit'
-				? 'Website settings'
-				: 'Install the tracking code'
+		step === 'delete'
+			? 'Delete this website?'
+			: mode === 'create'
+				? step === 'form'
+					? 'Add a website'
+					: 'Install the tracking code'
+				: mode === 'edit'
+					? 'Website settings'
+					: 'Install the tracking code'
 	);
 	const description = $derived(
-		mode === 'create' && step === 'form'
-			? 'Track calls, bookings, form leads and CTA clicks from another website.'
-			: step === 'install'
-				? `Add this code to ${website?.name ?? 'the website'} once. Leads appear in the dashboard as soon as visitors use it.`
-				: 'Change how this website is named, where it runs and which domains may send leads.'
+		step === 'delete'
+			? 'This permanently removes the website and everything recorded for it.'
+			: mode === 'create' && step === 'form'
+				? 'Track calls, bookings, form leads and CTA clicks from another website.'
+				: step === 'install'
+					? `Add this code to ${website?.name ?? 'the website'} once. Leads appear in the dashboard as soon as visitors use it.`
+					: 'Change how this website is named, where it runs and which domains may send leads.'
 	);
+
+	function leadCountFor(siteKey: string): number {
+		const counts = page.data.siteCounts as { site: string | null; total: number }[] | null;
+		return counts?.find((row) => row.site === siteKey)?.total ?? 0;
+	}
 </script>
+
+{#snippet deleteStep(target: Website)}
+	{@const leads = leadCountFor(target.key)}
+	{@const confirmed = confirmName.trim() === target.name}
+	<div class="grid gap-3 rounded-xl bg-destructive/[0.06] p-4 ring-1 ring-destructive/20">
+		<p class="flex items-center gap-2 text-sm font-medium text-destructive">
+			<TriangleAlertIcon class="size-4" />
+			Everything below is deleted for good and can’t be recovered
+		</p>
+		<ul
+			class="grid list-disc gap-1.5 pl-5 text-sm text-muted-foreground marker:text-destructive/60"
+		>
+			<li>
+				<span class="font-medium text-foreground"
+					>{formatNumber(leads)} {leads === 1 ? 'lead' : 'leads'}</span
+				>: every CTA click and form submission, with its attribution
+			</li>
+			<li>Its analytics, charts and CSV exports (they’re built from those leads)</li>
+			<li>
+				{target.domains.length === 1 ? 'Its domain' : `Its ${target.domains.length} domains`}
+				<span class="text-foreground">{target.domains.join(', ')}</span>
+			</li>
+			<li>
+				Its tracking code stops working at once (site key
+				<code class="font-mono text-xs text-foreground">{target.key}</code>)
+			</li>
+		</ul>
+		<p class="text-xs text-muted-foreground">
+			Only want to pause tracking? Go back and use <span class="text-foreground">Disable</span> instead:
+			it keeps everything.
+		</p>
+	</div>
+
+	<form
+		method="POST"
+		action={action('delete')}
+		class="grid gap-4"
+		use:enhance={({ cancel }) => {
+			// One request only, however many times the button is pressed.
+			if (saving) return cancel();
+			saving = true;
+			message = null;
+			return async ({ result }) => {
+				if (result.type === 'success') {
+					const deleted = result.data?.deleted as { key: string; name: string; leads: number };
+					// `saving` stays true, so the closing form can't be submitted again; the next time the
+					// dialog opens resets it. (Assigning `open` directly bypasses the bind guard.)
+					open = false;
+					showDeleted({
+						title: 'Website deleted',
+						detail: `${deleted.name} and ${formatNumber(deleted.leads)} ${deleted.leads === 1 ? 'lead' : 'leads'} removed`
+					});
+					// Leave the deleted website's own view; elsewhere just refresh the data.
+					if (siteFromUrl(page.url) === deleted.key) {
+						await goto(
+							page.url.pathname === '/analytics' ? resolve('/(app)/analytics') : resolve('/(app)')
+						);
+					} else {
+						await refreshAll();
+					}
+					return;
+				}
+				saving = false;
+				message =
+					result.type === 'failure'
+						? String(result.data?.message ?? 'Could not delete the website.')
+						: 'Something went wrong. Please try again.';
+				if (result.type === 'failure' && result.status === 404) await refreshAll();
+			};
+		}}
+	>
+		<input type="hidden" name="key" value={target.key} />
+		<div class="grid gap-1.5">
+			<Label for="website-confirm-name" class="block">
+				Type <span class="font-semibold select-all">{target.name}</span> to confirm
+			</Label>
+			<Input
+				id="website-confirm-name"
+				name="confirmName"
+				bind:value={confirmName}
+				placeholder={target.name}
+				autocomplete="off"
+				autocapitalize="off"
+				spellcheck="false"
+				disabled={saving}
+				aria-invalid={confirmName && !confirmed ? true : undefined}
+			/>
+		</div>
+
+		{#if message}
+			<p
+				class="flex items-start gap-2 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive ring-1 ring-destructive/20"
+				role="alert"
+			>
+				<CircleAlertIcon class="mt-0.5 size-4 shrink-0" />
+				{message}
+			</p>
+		{/if}
+
+		<Dialog.Footer>
+			<Button
+				variant="outline"
+				disabled={saving}
+				onclick={() => {
+					step = 'form';
+					message = null;
+				}}>Back</Button
+			>
+			<Button
+				type="submit"
+				class="bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/30"
+				disabled={!confirmed || saving}
+				aria-busy={saving}
+			>
+				{#if saving}
+					<Loader2Icon class="animate-spin" />
+					Deleting…
+				{:else}
+					<Trash2Icon />
+					Delete permanently
+				{/if}
+			</Button>
+		</Dialog.Footer>
+	</form>
+{/snippet}
 
 <Dialog.Root bind:open={() => open, (next) => (open = saving ? true : next)}>
 	<Dialog.Content
@@ -130,10 +273,17 @@
 	>
 		<div class="flex items-start gap-3 pr-8">
 			<span
-				class="grid size-10 shrink-0 place-items-center rounded-xl bg-foreground/[0.06] ring-1 ring-foreground/10"
-				style:color={website?.accent}
+				class={cn(
+					'grid size-10 shrink-0 place-items-center rounded-xl ring-1',
+					step === 'delete'
+						? 'bg-destructive/10 text-destructive ring-destructive/20'
+						: 'bg-foreground/[0.06] ring-foreground/10'
+				)}
+				style:color={step === 'delete' ? undefined : website?.accent}
 			>
-				{#if step === 'install'}
+				{#if step === 'delete'}
+					<Trash2Icon class="size-5" />
+				{:else if step === 'install'}
 					<CircleCheckIcon class="size-5" />
 				{:else}
 					<GlobeIcon class="size-5" />
@@ -147,7 +297,9 @@
 
 		{#key step}
 			<div in:fly={{ y: 6, duration: 180 }} class="grid gap-5">
-				{#if step === 'install' && website}
+				{#if step === 'delete' && website}
+					{@render deleteStep(website)}
+				{:else if step === 'install' && website}
 					<div
 						class="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-foreground/[0.03] px-3 py-2 ring-1 ring-foreground/[0.08]"
 					>
@@ -425,6 +577,31 @@
 									{/if}
 								</form>
 							</div>
+						</div>
+						<div
+							class="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-destructive/[0.04] px-3 py-3 ring-1 ring-destructive/20"
+						>
+							<div class="space-y-0.5">
+								<p class="text-sm font-medium text-destructive">Delete website</p>
+								<p class="text-xs text-muted-foreground">
+									Removes the website and all its leads for good. Can’t be undone.
+								</p>
+							</div>
+							<Button
+								variant="destructive"
+								size="sm"
+								disabled={saving}
+								onclick={() => {
+									confirmName = '';
+									message = null;
+									step = 'delete';
+									// Show the current lead count, not the one from when the page loaded.
+									refreshAll();
+								}}
+							>
+								<Trash2Icon />
+								Delete…
+							</Button>
 						</div>
 					{/if}
 				{/if}

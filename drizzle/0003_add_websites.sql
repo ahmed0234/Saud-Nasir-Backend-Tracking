@@ -29,6 +29,18 @@ INSERT INTO "website_domains" ("hostname", "website_key") VALUES
 	('platinumsg.com', 'platinum-sg'),
 	('cleanmastercarpetcleaning.com', 'clean-master'),
 	('emgair.com', 'emg-air');--> statement-breakpoint
+-- Their snippets are already installed but predate the install ping, so they count as last seen
+-- at their most recent lead instead of "waiting for installation".
+UPDATE "websites" SET
+	"last_seen_at" = latest."clicked_at",
+	"last_seen_url" = latest."page_url"
+FROM (
+	SELECT DISTINCT ON ("site") "site", "clicked_at", "page_url"
+	FROM "cta_clicks"
+	WHERE "site" IS NOT NULL
+	ORDER BY "site", "clicked_at" DESC
+) AS latest
+WHERE latest."site" = "websites"."key";--> statement-breakpoint
 -- Any other site key already on a lead (none expected) becomes a disabled website, so the foreign
 -- key below can be added without touching lead rows.
 INSERT INTO "websites" ("key", "name", "url", "accent", "disabled_at")

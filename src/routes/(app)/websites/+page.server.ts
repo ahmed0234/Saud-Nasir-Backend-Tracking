@@ -1,5 +1,7 @@
 import {
 	createWebsite,
+	deleteWebsite,
+	getWebsite,
 	setWebsiteDisabled,
 	updateWebsite,
 	WebsiteError,
@@ -100,6 +102,22 @@ export const actions: Actions = {
 		return run(async () => {
 			await setWebsiteDisabled(key, disabled);
 			return { disabled };
+		});
+	},
+
+	/** Permanently deletes a website and all its leads. Requires its exact name, typed again. */
+	delete: async ({ request }) => {
+		const form = await request.formData();
+		const key = siteKeyFrom(form);
+		if (!key) return fail(400, { message: 'Unknown website.' });
+		const website = await getWebsite(key);
+		if (!website) return fail(404, { message: 'That website was already deleted.' });
+		if (String(form.get('confirmName') ?? '').trim() !== website.name) {
+			return fail(400, { message: 'Type the website’s name exactly to confirm.' });
+		}
+		return run(async () => {
+			const { leads } = await deleteWebsite(key);
+			return { deleted: { key, name: website.name, leads } };
 		});
 	}
 };

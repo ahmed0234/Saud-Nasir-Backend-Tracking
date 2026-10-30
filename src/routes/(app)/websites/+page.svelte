@@ -14,6 +14,10 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import SettingsIcon from '@lucide/svelte/icons/settings';
 	import { resolve } from '$app/paths';
+	import { flip } from 'svelte/animate';
+	import { cubicOut } from 'svelte/easing';
+	import { prefersReducedMotion } from 'svelte/motion';
+	import { scale } from 'svelte/transition';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -21,6 +25,7 @@
 	const leadCount = (key: string) => data.siteCounts?.find((row) => row.site === key)?.total ?? 0;
 	const platformLabel = (value: string) =>
 		WEBSITE_PLATFORMS.find((option) => option.value === value)?.label ?? value;
+	const motion = (ms: number) => (prefersReducedMotion.current ? 0 : ms);
 	const dashboardHref = (key: string) =>
 		resolve(`?${new URLSearchParams({ [SITE_URL_PARAM]: key })}`);
 </script>
@@ -63,7 +68,10 @@
 	{:else}
 		<ul class="grid gap-4 md:grid-cols-2" data-stagger>
 			{#each data.websites as website (website.key)}
+				<!-- A deleted website's card shrinks away and the others slide into its place. -->
 				<li
+					animate:flip={{ duration: motion(320), easing: cubicOut }}
+					out:scale={{ start: 0.9, duration: motion(260), easing: cubicOut }}
 					class={cn(
 						'flex flex-col gap-4 rounded-2xl glass p-5 transition-opacity',
 						website.disabled && 'opacity-75'

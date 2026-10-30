@@ -13,6 +13,9 @@
 	import PlusIcon from '@lucide/svelte/icons/plus';
 	import { resolve } from '$app/paths';
 	import { navigating, page } from '$app/state';
+	import { cubicOut } from 'svelte/easing';
+	import { prefersReducedMotion } from 'svelte/motion';
+	import { slide } from 'svelte/transition';
 	import { openWebsiteDialog } from './website-dialog.svelte';
 
 	let {
@@ -141,7 +144,11 @@
 				{@const active = option.id === currentSite}
 				{@const selected = option.id === selectedSite}
 				{@const count = countFor(option.id)}
-				<li>
+				<!-- Added and deleted websites slide in and out (not on first render). -->
+				<li
+					in:slide={{ duration: prefersReducedMotion.current ? 0 : 260, easing: cubicOut }}
+					out:slide={{ duration: prefersReducedMotion.current ? 0 : 320, easing: cubicOut }}
+				>
 					<a
 						href={siteHref(option.id)}
 						aria-current={active ? 'page' : undefined}
