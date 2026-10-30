@@ -27,7 +27,7 @@ export default defineConfig(({ command, mode }) => {
 				},
 				// Covers the slowest path: a notification or test email whose first SMTP connection
 				// fails and is retried (two attempts of up to ~30s each).
-				adapter: adapter({ maxDuration: 60 }),
+				adapter: adapter({ runtime: 'nodejs24.x', maxDuration: 60 }),
 				csrf: {
 					// SvelteKit rejects cross-origin text/plain POSTs (what navigator.sendBeacon sends)
 					// unless the origin is trusted. Read at build time, so redeploy after changing it.
