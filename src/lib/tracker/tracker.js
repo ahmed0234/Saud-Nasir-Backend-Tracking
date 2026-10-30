@@ -1,7 +1,14 @@
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment -- untyped ES5 browser script, checked by ESLint and an ES5 parse instead
+// @ts-nocheck
 /**
- * Clean Master lead tracker (https://www.cleanmastercarpetcleaning.com)
+ * Lead tracker: the one tracking script for every website registered in the dashboard.
  *
- * Records leads for this website in the tracking backend:
+ * Served as /t.js and installed with <script src="https://<backend>/t.js" data-site="SITE_KEY" defer>,
+ * or pasted inline (the dashboard's "full code" fallback, where the server fills in INLINE_CONFIG).
+ * Keep it ES5 syntax: it also runs as a Google Tag Manager Custom HTML tag
+ * (check with `npx acorn --ecma5 src/lib/tracker/tracker.js`).
+ *
+ * Records leads for the website in the tracking backend:
  *
  *   Lead actions (eventType "cta_click"), recorded as leads the moment they're clicked:
  *     - phone links (href="tel:...")                     buttonType "call"
@@ -40,19 +47,28 @@
  * It never calls preventDefault() or stopPropagation(), so links, phone calls and forms work
  * exactly as before. Tracking errors are swallowed and never break the page.
  *
- * Install (WordPress): WPCode → Add Snippet → JavaScript Snippet → paste this whole file →
- * Location: Site Wide Footer → Active. Deactivate any older CTA tracker snippet. Exclude it from
- * "delay JavaScript" in WP Rocket / LiteSpeed and clear caches after updating.
- * Debug: add ?cta_debug=1 to any page URL and watch the browser console.
+ * Installation status: once a day per browser it sends a "ping" so the dashboard can show the
+ * website as installed and when it was last seen. Pings are not leads.
  *
- * The three site snippets are identical except for SITE and this header.
+ * Install instructions for WordPress (WPCode) and HTML are in the dashboard. Exclude it from
+ * "delay JavaScript" in WP Rocket / LiteSpeed and clear caches after installing.
+ * Debug: add ?cta_debug=1 to any page URL and watch the browser console.
  */
 (function () {
 	'use strict';
 
-	// This website's identifier in the tracking backend. Don't change it.
-	var SITE = 'clean-master';
-	var ENDPOINT = 'https://fluxpoint-omega.vercel.app/api/cta-click';
+	// The inline install code sets this to { site, endpoint }; the hosted /t.js leaves it null and
+	// reads them from its own <script data-site> tag instead. Don't edit this line: the server
+	// replaces it.
+	var INLINE_CONFIG = null;
+	var SCRIPT =
+		document.currentScript ||
+		document.querySelector('script[data-site][src*="/t.js"]') ||
+		document.querySelector('script[data-site]');
+	// This website's site key in the tracking backend, and where events go.
+	var SITE = INLINE_CONFIG ? INLINE_CONFIG.site : SCRIPT && SCRIPT.getAttribute('data-site');
+	var ENDPOINT = INLINE_CONFIG ? INLINE_CONFIG.endpoint : SCRIPT && endpointFor(SCRIPT.src);
+	var PING_INTERVAL_MS = 24 * 60 * 60 * 1000;
 	var FORM_DEDUPE_MS = 3000;
 	// One lead per call/text/email/booking action: double taps, a sticky header's second copy of
 	// the same phone link and click + middle-click all land in this window.
@@ -64,6 +80,19 @@
 	// Labels longer than this are content (FAQ questions, cards), not CTA buttons.
 	var MAX_CTA_LABEL = 40;
 	var STORAGE_PREFIX = 'leadTracker:';
+
+	function endpointFor(src) {
+		try {
+			return new URL('/api/cta-click', src).href;
+		} catch (_error) {
+			return null;
+		}
+	}
+
+	if (!SITE || !ENDPOINT) {
+		if (window.console) console.warn('[CTA tracker] Missing data-site: tracking is off.');
+		return;
+	}
 
 	// Load once, even if the snippet ends up on the page twice (e.g. WPCode and Tag Manager).
 	// Older tracker versions use the same flag, so an old and a new copy never both send.
@@ -300,6 +329,14 @@
 			pageUrl: stored.pageUrl,
 			clickedAt: new Date(stored.at).toISOString()
 		};
+	}
+
+	/** Tells the dashboard the tracker is installed and working: at most once a day per browser. */
+	function pingIfDue() {
+		var last = readStored('ping');
+		if (last && last.site === SITE && isFresh(last, PING_INTERVAL_MS)) return;
+		writeStored('ping', { site: SITE, at: Date.now() });
+		log('installation ping sent via ' + send({ eventType: 'ping' }));
 	}
 
 	// ---------------------------------------------------------------------------------------------
@@ -640,6 +677,7 @@
 
 	try {
 		captureCampaign();
+		pingIfDue();
 	} catch (_error) {
 		// Tracking must never break the page.
 	}

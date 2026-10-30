@@ -1,13 +1,6 @@
 import { and, asc, eq, gte, lt } from 'drizzle-orm';
 import { leadOrigin } from '#lib/lead-attribution.ts';
-import {
-	buttonTypeLabel,
-	CAMPAIGN_FIELDS,
-	EVENT_TYPE_LABELS,
-	getSite,
-	isEventType,
-	type SiteId
-} from '#lib/sites.ts';
+import { buttonTypeLabel, CAMPAIGN_FIELDS, EVENT_TYPE_LABELS, isEventType } from '#lib/sites.ts';
 import { db } from './db/index.ts';
 import { ctaClicks } from './db/schema.ts';
 
@@ -42,7 +35,7 @@ const COLUMNS = [
 ];
 
 /** Every lead in [start, end) for one website (or all, when site is null), oldest first. */
-export async function getLeadsForExport(start: Date, end: Date, site: SiteId | null) {
+export async function getLeadsForExport(start: Date, end: Date, site: string | null) {
 	return db
 		.select()
 		.from(ctaClicks)
@@ -58,7 +51,12 @@ export async function getLeadsForExport(start: Date, end: Date, site: SiteId | n
 
 type ExportRow = Awaited<ReturnType<typeof getLeadsForExport>>[number];
 
-export function leadsToCsv(rows: ExportRow[], timeZone: string): string {
+/** `siteNames`: website name by site key. */
+export function leadsToCsv(
+	rows: ExportRow[],
+	timeZone: string,
+	siteNames: Map<string, string>
+): string {
 	// sv-SE formats as "2026-10-30 13:52:07": sortable and unambiguous in any spreadsheet locale.
 	const local = new Intl.DateTimeFormat('sv-SE', {
 		timeZone,
@@ -78,7 +76,7 @@ export function leadsToCsv(rows: ExportRow[], timeZone: string): string {
 			time,
 			timeZone,
 			isoSeconds(row.clickedAt),
-			getSite(row.site)?.name ?? (hostOf(row.pageUrl) || 'Other'),
+			(row.site && siteNames.get(row.site)) || hostOf(row.pageUrl) || 'Other',
 			isEventType(row.eventType) ? EVENT_TYPE_LABELS[row.eventType] : row.eventType,
 			buttonTypeLabel(row.buttonType),
 			row.buttonText,

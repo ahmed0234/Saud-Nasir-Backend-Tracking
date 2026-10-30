@@ -61,3 +61,22 @@ export function splitUrl(value: string): { host: string; path: string } {
 		return { host: '', path: value };
 	}
 }
+
+const relativeFormatter = new Intl.RelativeTimeFormat('en-US', { numeric: 'auto' });
+
+/** "just now", "5 minutes ago", "yesterday", "3 weeks ago", ... */
+export function formatRelative(iso: string | Date, now: number = Date.now()): string {
+	const seconds = Math.round((new Date(iso).getTime() - now) / 1000);
+	if (Math.abs(seconds) < 45) return 'just now';
+	const units: [Intl.RelativeTimeFormatUnit, number][] = [
+		['minute', 60],
+		['hour', 3600],
+		['day', 86_400],
+		['week', 604_800],
+		['month', 2_629_800],
+		['year', 31_557_600]
+	];
+	let unit = units[0];
+	for (const candidate of units) if (Math.abs(seconds) >= candidate[1]) unit = candidate;
+	return relativeFormatter.format(Math.round(seconds / unit[1]), unit[0]);
+}

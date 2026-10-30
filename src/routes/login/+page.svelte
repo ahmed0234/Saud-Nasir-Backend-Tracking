@@ -2,7 +2,7 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { Input } from '#lib/components/ui/input/index.js';
 	import { Label } from '#lib/components/ui/label/index.js';
-	import { SITES } from '#lib/sites.ts';
+	import { ACCENT_PALETTE } from '#lib/sites.ts';
 	import ActivityIcon from '@lucide/svelte/icons/activity';
 	import CheckIcon from '@lucide/svelte/icons/check';
 	import CircleAlertIcon from '@lucide/svelte/icons/circle-alert';
@@ -30,7 +30,7 @@
 	let passwordInput = $state<HTMLInputElement | null>(null);
 
 	const redirectTo = $derived(page.url.searchParams.get('redirectTo') ?? '/');
-	const [blobA, blobB, blobC] = SITES.map((site) => site.accent);
+	const [blobA, blobB, blobC] = ACCENT_PALETTE;
 </script>
 
 <svelte:head>

@@ -1,13 +1,47 @@
 import { sql } from 'drizzle-orm';
 import { boolean, index, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core';
 
+// Websites that may send leads. Managed from the dashboard; never hard-deleted (disabling keeps
+// their leads and stops new ones).
+export const websites = pgTable('websites', {
+	// Public site key, sent by the tracking script and stored in cta_clicks.site. Never changes.
+	key: text('key').primaryKey(),
+	name: text('name').notNull(),
+	// Home page, e.g. https://www.example.com (links and display).
+	url: text('url').notNull(),
+	accent: text('accent').notNull(),
+	// 'wordpress' | 'html' | 'both': which install instructions the dashboard shows.
+	platform: text('platform').notNull().default('wordpress'),
+	// Set when disabled: the API then rejects its events. Null = active.
+	disabledAt: timestamp('disabled_at', { withTimezone: true, mode: 'date' }),
+	// When its tracking script last reported in (install ping or lead), and from which page.
+	lastSeenAt: timestamp('last_seen_at', { withTimezone: true, mode: 'date' }),
+	lastSeenUrl: text('last_seen_url'),
+	createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+	updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+});
+
+// Hostnames a website's events may come from, without "www." (www and non-www both match). A
+// hostname belongs to exactly one website.
+export const websiteDomains = pgTable(
+	'website_domains',
+	{
+		hostname: text('hostname').primaryKey(),
+		websiteKey: text('website_key')
+			.notNull()
+			.references(() => websites.key, { onDelete: 'cascade' }),
+		createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow()
+	},
+	(table) => [index('website_domains_website_key_idx').on(table.websiteKey)]
+);
+
 export const ctaClicks = pgTable(
 	'cta_clicks',
 	{
 		id: uuid('id').primaryKey().defaultRandom(),
-		// Which website the lead came from (an id from src/lib/sites.ts). Null only for leads from a
-		// domain that isn't one of the configured sites (e.g. rows recorded before this column).
-		site: text('site'),
+		// Which website the lead came from (its site key). Null only for leads from domains that
+		// were never a registered website (two old rows from before this column).
+		site: text('site').references(() => websites.key),
 		// 'cta_click' or 'form_submit'. Rows recorded before this column were all CTA clicks.
 		eventType: text('event_type').notNull().default('cta_click'),
 		// What was clicked: call, booking, email, sms, button, elementor_form, fluent_form, ...

@@ -8,7 +8,7 @@ import {
 } from '#lib/date-range.ts';
 import { getRangeAnalytics, localDayBounds } from '#lib/server/analytics.ts';
 import { deleteLeadsInRange, parseRange } from '#lib/server/delete-leads.ts';
-import { isSiteId, siteFromUrl } from '#lib/sites.ts';
+import { getWebsite, selectedSite } from '#lib/server/websites.ts';
 import { resolveTimeZone, TIME_ZONE_COOKIE } from '#lib/timezone.ts';
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -18,7 +18,7 @@ const DAY_MS = 24 * 60 * 60_000;
 export const load: PageServerLoad = async ({ url, cookies, setHeaders }) => {
 	setHeaders({ 'cache-control': 'no-store' });
 	const timeZone = resolveTimeZone(cookies.get(TIME_ZONE_COOKIE));
-	const site = siteFromUrl(url);
+	const site = await selectedSite(url).catch(() => null);
 	const now = new Date();
 
 	let key: RangeKey = DEFAULT_RANGE;
@@ -97,19 +97,14 @@ export const actions: Actions = {
 		const form = await request.formData();
 		const range = parseRange(form.get('start'), form.get('end'));
 		if (!range) return fail(400, { message: 'Invalid date range.' });
-		// Empty means all websites; anything else must be a known site id.
+		// Empty means all websites; anything else must be a registered website.
 		const siteValue = form.get('site') ?? '';
-		if (siteValue !== '' && !isSiteId(siteValue)) {
-			return fail(400, { message: 'Unknown website.' });
-		}
+		const site = typeof siteValue === 'string' && siteValue ? await getWebsite(siteValue) : null;
+		if (siteValue !== '' && !site) return fail(400, { message: 'Unknown website.' });
 
 		try {
 			return {
-				deleted: await deleteLeadsInRange(
-					range.start,
-					range.end,
-					isSiteId(siteValue) ? siteValue : null
-				)
+				deleted: await deleteLeadsInRange(range.start, range.end, site?.key ?? null)
 			};
 		} catch (error) {
 			console.error('Failed to delete leads in range', error);

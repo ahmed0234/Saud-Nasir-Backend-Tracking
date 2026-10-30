@@ -12,7 +12,7 @@
 		sourceCtaSummary
 	} from '#lib/lead-attribution.ts';
 	import type { RecentClick } from '#lib/server/analytics.ts';
-	import { buttonTypeLabel, EVENT_TYPE_LABELS, getSite, isEventType } from '#lib/sites.ts';
+	import { buttonTypeLabel, EVENT_TYPE_LABELS, findWebsite, isEventType } from '#lib/sites.ts';
 	import { cn } from '#lib/utils.js';
 	import ArrowUpRightIcon from '@lucide/svelte/icons/arrow-up-right';
 	import CalendarCheckIcon from '@lucide/svelte/icons/calendar-check';
@@ -25,6 +25,7 @@
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
 	import PhoneIcon from '@lucide/svelte/icons/phone';
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
+	import { page } from '$app/state';
 	import type { Component } from 'svelte';
 
 	let {
@@ -57,7 +58,7 @@
 	const Icon = $derived(
 		isForm ? ClipboardListIcon : (ICONS[lead.buttonType ?? ''] ?? MousePointerClickIcon)
 	);
-	const site = $derived(getSite(lead.site));
+	const site = $derived(findWebsite(page.data.websites, lead.site));
 	const url = $derived(splitUrl(lead.pageUrl));
 	const kind = $derived(isEventType(lead.eventType) ? EVENT_TYPE_LABELS[lead.eventType] : 'Lead');
 	const buttonLabel = $derived(buttonTypeLabel(lead.buttonType));

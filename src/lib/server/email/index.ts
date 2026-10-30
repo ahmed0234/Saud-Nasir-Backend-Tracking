@@ -1,10 +1,5 @@
 import { createTransport, type Transporter } from 'nodemailer';
-import {
-	CORS_ALLOWED_ORIGINS,
-	GMAIL_APP_PASSWORD,
-	GMAIL_USER,
-	NOTIFICATION_EMAIL_TO
-} from '$app/env/private';
+import { GMAIL_APP_PASSWORD, GMAIL_USER, NOTIFICATION_EMAIL_TO } from '$app/env/private';
 import { renderCtaClickEmail, type CtaClickEmailDetails } from './cta-click-email.ts';
 
 type SmtpError = Error & {
@@ -101,7 +96,6 @@ export async function sendCtaClickNotification(click: CtaClickEmailDetails): Pro
 
 /** Sends a sample notification to the configured recipients. Never throws. */
 export async function sendTestEmail(): Promise<DeliveryResult> {
-	const site = CORS_ALLOWED_ORIGINS[0] ?? 'https://example.com';
 	return deliver(
 		{
 			id: crypto.randomUUID(),
@@ -110,7 +104,8 @@ export async function sendTestEmail(): Promise<DeliveryResult> {
 			buttonType: 'call',
 			buttonText: 'Call Now',
 			formName: null,
-			pageUrl: `${site}/sample-page/`,
+			pageUrl: 'https://www.example.com/sample-page/',
+			siteName: 'Sample website',
 			city: 'Austin',
 			state: 'TX',
 			clickedAt: new Date(),

@@ -6,9 +6,9 @@
 	Only transform and opacity are animated, so it stays on the compositor.
 -->
 <script lang="ts">
-	import { SITES } from '#lib/sites.ts';
+	import { ACCENT_PALETTE } from '#lib/sites.ts';
 
-	const [accentA, accentB, accentC] = SITES.map((site) => site.accent);
+	const [accentA, accentB, accentC] = ACCENT_PALETTE;
 </script>
 
 <div

@@ -5,13 +5,7 @@ import {
 	leadOrigin,
 	sourceCtaSummary
 } from '#lib/lead-attribution.ts';
-import {
-	buttonTypeLabel,
-	EVENT_TYPE_LABELS,
-	getSite,
-	isEventType,
-	type CampaignKey
-} from '#lib/sites.ts';
+import { buttonTypeLabel, EVENT_TYPE_LABELS, isEventType, type CampaignKey } from '#lib/sites.ts';
 import type { CtaClick } from '../db/schema.ts';
 
 export type CtaClickEmailDetails = Pick<
@@ -32,6 +26,8 @@ export type CtaClickEmailDetails = Pick<
 	| 'sourceCtaPlacement'
 	| CampaignKey
 > & {
+	/** The website's name in the dashboard. */
+	siteName: string | null;
 	country: string | null;
 	userAgent: string | null;
 };
@@ -61,7 +57,7 @@ export function renderCtaClickEmail(click: CtaClickEmailDetails, { test = false 
 	const clickedAtUtc = `${utcFormatter.format(click.clickedAt)} UTC`;
 	const isForm = click.eventType === 'form_submit';
 	const leadType = isEventType(click.eventType) ? EVENT_TYPE_LABELS[click.eventType] : 'CTA click';
-	const siteName = getSite(click.site)?.name ?? url.host;
+	const siteName = click.siteName ?? url.host;
 	const button = [buttonTypeLabel(click.buttonType), click.buttonText && `"${click.buttonText}"`]
 		.filter(Boolean)
 		.join(' · ');

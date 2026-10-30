@@ -1,6 +1,5 @@
 import { and, eq, gte, inArray, lt } from 'drizzle-orm';
 import { MAX_CUSTOM_DAYS } from '#lib/date-range.ts';
-import type { SiteId } from '#lib/sites.ts';
 import { db } from './db/index.ts';
 import { ctaClicks } from './db/schema.ts';
 
@@ -54,7 +53,7 @@ export async function deleteLeadsById(ids: string[]): Promise<number> {
 export async function deleteLeadsInRange(
 	start: Date,
 	end: Date,
-	site: SiteId | null
+	site: string | null
 ): Promise<number> {
 	const deleted = await db
 		.delete(ctaClicks)

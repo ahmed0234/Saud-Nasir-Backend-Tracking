@@ -1,48 +1,100 @@
-// The WordPress websites that send leads to this backend. Shared by the API (to tag each lead),
-// the dashboard (sidebar filter) and the email. `id` is stored in cta_clicks.site and is the value
-// each site's snippet sends; never rename an id once leads have been stored with it. `accent` is
-// the site's colour in the dashboard.
-export const SITES = [
-	{
-		id: 'platinum-sg',
-		name: 'Platinum SG',
-		url: 'https://www.platinumsg.com',
-		hosts: ['www.platinumsg.com', 'platinumsg.com'],
-		accent: 'oklch(0.72 0.16 295)'
-	},
-	{
-		id: 'clean-master',
-		name: 'Clean Master',
-		url: 'https://www.cleanmastercarpetcleaning.com',
-		hosts: ['www.cleanmastercarpetcleaning.com', 'cleanmastercarpetcleaning.com'],
-		accent: 'oklch(0.74 0.14 230)'
-	},
-	{
-		id: 'emg-air',
-		name: 'EMG Air',
-		url: 'https://www.emgair.com',
-		hosts: ['www.emgair.com', 'emgair.com'],
-		accent: 'oklch(0.76 0.15 160)'
-	}
-] as const;
+// Websites that send leads to this backend live in the database (`websites` and
+// `website_domains`, managed from the dashboard). This module holds what server and client share
+// about them. A website's `key` is its public site key: stored in cta_clicks.site and sent by its
+// tracking script. Never change a key once leads are stored with it.
 
-export type Site = (typeof SITES)[number];
-export type SiteId = Site['id'];
+export type WebsitePlatform = 'wordpress' | 'html' | 'both';
+
+export const WEBSITE_PLATFORMS: { value: WebsitePlatform; label: string; hint: string }[] = [
+	{ value: 'wordpress', label: 'WordPress', hint: 'Installed with the WPCode plugin' },
+	{ value: 'html', label: 'HTML / Custom JS', hint: 'Pasted into the page source' },
+	{ value: 'both', label: 'Both', hint: 'WordPress pages and static HTML pages' }
+];
+
+export function isWebsitePlatform(value: unknown): value is WebsitePlatform {
+	return value === 'wordpress' || value === 'html' || value === 'both';
+}
+
+/** What the dashboard knows about a website (dates as ISO strings). */
+export type Website = {
+	key: string;
+	name: string;
+	/** Home page, e.g. https://www.example.com. */
+	url: string;
+	accent: string;
+	platform: WebsitePlatform;
+	/** Registered hostnames without "www." (www and non-www both match), primary first. */
+	domains: string[];
+	disabled: boolean;
+	/** Last time its tracking script reported in (install ping or lead); null = never. */
+	lastSeenAt: string | null;
+	lastSeenUrl: string | null;
+	createdAt: string;
+};
 
 export const SITE_URL_PARAM = 'site';
+export const SITE_KEY_PATTERN = /^[a-z0-9-]{1,64}$/;
 
-export function isSiteId(value: unknown): value is SiteId {
-	return typeof value === 'string' && SITES.some((site) => site.id === value);
+// Sidebar colours for new websites, in the order they're handed out. The first three are the
+// original sites' colours; decorative backgrounds (login, intro) use them too.
+export const ACCENT_PALETTE = [
+	'oklch(0.72 0.16 295)',
+	'oklch(0.74 0.14 230)',
+	'oklch(0.76 0.15 160)',
+	'oklch(0.78 0.15 75)',
+	'oklch(0.7 0.18 25)',
+	'oklch(0.72 0.17 340)',
+	'oklch(0.75 0.13 195)',
+	'oklch(0.77 0.16 125)',
+	'oklch(0.7 0.15 265)',
+	'oklch(0.76 0.14 50)'
+];
+
+export function findWebsite(
+	websites: readonly Website[] | null | undefined,
+	key: string | null | undefined
+): Website | undefined {
+	return key ? websites?.find((website) => website.key === key) : undefined;
 }
 
-export function getSite(id: string | null | undefined): Site | undefined {
-	return SITES.find((site) => site.id === id);
+/** A hostname as stored: lowercase, without a leading "www.". */
+export function hostKey(hostname: string): string {
+	return hostname
+		.toLowerCase()
+		.replace(/\.$/, '')
+		.replace(/^www\./, '');
 }
 
-/** The site that owns `hostname`, if it is one of the production domains. */
-export function siteForHost(hostname: string): Site | undefined {
-	const host = hostname.toLowerCase();
-	return SITES.find((site) => (site.hosts as readonly string[]).includes(host));
+/**
+ * Parses what someone typed as a website address ("RoofingCo.com", "https://www.x.com/about")
+ * into its home page URL and stored hostname, or an error message.
+ */
+export function parseDomainInput(
+	input: string
+): { ok: true; url: string; host: string } | { ok: false; error: string } {
+	const trimmed = input.trim();
+	if (!trimmed) return { ok: false, error: 'Enter the website address.' };
+	let url: URL;
+	try {
+		url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`);
+	} catch {
+		return { ok: false, error: 'Enter a valid address, like roofingco.com.' };
+	}
+	const hostname = url.hostname.toLowerCase().replace(/\.$/, '');
+	if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+		return { ok: false, error: 'The address must be a website (http or https).' };
+	}
+	if (
+		!hostname.includes('.') ||
+		/^[\d.]+$/.test(hostname) ||
+		hostname.includes(':') ||
+		hostname.length > 253 ||
+		!/^[a-z0-9.-]+$/.test(hostname) ||
+		hostname.split('.').some((label) => !label || label.length > 63 || /^-|-$/.test(label))
+	) {
+		return { ok: false, error: 'Enter a domain name, like roofingco.com.' };
+	}
+	return { ok: true, url: `${url.protocol}//${hostname}`, host: hostKey(hostname) };
 }
 
 // Lead kinds. A CTA click is a phone/booking/Elementor button click; a form submission is a
@@ -108,10 +160,13 @@ export function buttonTypeLabel(value: string | null): string | null {
 	return BUTTON_TYPE_LABELS[value] ?? value.replace(/[_-]+/g, ' ');
 }
 
-/** The site selected in the dashboard (`?site=`), or null for all websites. */
+/**
+ * The site key selected in the dashboard (`?site=`), or null for all websites. Only the format is
+ * checked here; server loads confirm the website exists.
+ */
 export function siteFromUrl(url: {
 	searchParams: URLSearchParams | { get(name: string): string | null };
-}): SiteId | null {
+}): string | null {
 	const value = url.searchParams.get(SITE_URL_PARAM);
-	return isSiteId(value) ? value : null;
+	return value && SITE_KEY_PATTERN.test(value) ? value : null;
 }

@@ -1,5 +1,5 @@
 import { count, countDistinct, desc, eq, gte, lt, and, sql, type SQL } from 'drizzle-orm';
-import type { Campaign, SiteId } from '#lib/sites.ts';
+import type { Campaign } from '#lib/sites.ts';
 import { db } from './db/index.ts';
 import { ctaClicks } from './db/schema.ts';
 
@@ -73,7 +73,7 @@ const BREAKDOWN_LIMIT = 10;
 const localMidnight = (timeZone: string) =>
 	sql`(date_trunc('day', now() at time zone ${timeZone}) at time zone ${timeZone})`;
 
-const forSite = (site: SiteId | null) => (site ? eq(ctaClicks.site, site) : undefined);
+const forSite = (site: string | null) => (site ? eq(ctaClicks.site, site) : undefined);
 
 const countWhere = (condition: SQL) => sql<number>`(count(*) filter (where ${condition}))::int`;
 const isFormSubmit = sql`${ctaClicks.eventType} = 'form_submit'`;
@@ -105,7 +105,7 @@ export async function getSiteCounts(timeZone: string): Promise<SiteCounts> {
 		.groupBy(ctaClicks.site);
 }
 
-export async function getDashboard(timeZone: string, site: SiteId | null) {
+export async function getDashboard(timeZone: string, site: string | null) {
 	const [summaryRows, recent] = await Promise.all([
 		db
 			.select({
@@ -142,7 +142,7 @@ export async function getRangeAnalytics(
 	start: Date,
 	end: Date,
 	timeZone: string,
-	site: SiteId | null
+	site: string | null
 ): Promise<RangeAnalytics> {
 	const inRange = and(gte(ctaClicks.clickedAt, start), lt(ctaClicks.clickedAt, end), forSite(site));
 	const previousStart = new Date(start.getTime() - (end.getTime() - start.getTime()));
@@ -287,7 +287,7 @@ async function buckets(
 	end: Date,
 	timeZone: string,
 	unit: 'hour' | 'day',
-	site: SiteId | null
+	site: string | null
 ): Promise<Bucket[]> {
 	const step = unit === 'hour' ? sql`interval '1 hour'` : sql`interval '1 day'`;
 	const truncLocal = (value: unknown) =>

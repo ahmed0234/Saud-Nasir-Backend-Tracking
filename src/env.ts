@@ -5,11 +5,6 @@ export const variables = defineEnvVars({
 		description: 'Neon PostgreSQL connection string (pooled).',
 		schema: (value) => required('DATABASE_URL', value)
 	},
-	CORS_ALLOWED_ORIGINS: {
-		description:
-			'Comma-separated origins allowed to send tracking events, e.g. https://example.com,https://www.example.com',
-		schema: (value) => parseOrigins(value)
-	},
 	GMAIL_USER: {
 		description: 'Gmail address that sends notification emails (SMTP login).',
 		schema: (value) => required('GMAIL_USER', value)
@@ -43,10 +38,6 @@ export const variables = defineEnvVars({
 		schema: (value) => value?.trim() || null
 	}
 });
-
-export function parseOrigins(value: string | undefined): string[] {
-	return parseList(value).map((origin) => origin.replace(/\/+$/, ''));
-}
 
 function parseList(value: string | undefined): string[] {
 	return (value ?? '')

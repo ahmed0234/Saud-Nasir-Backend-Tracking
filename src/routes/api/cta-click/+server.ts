@@ -4,20 +4,29 @@ import { sendCtaClickNotification } from '#lib/server/email/index.ts';
 import { geoFromHeaders } from '#lib/server/geo.ts';
 import { createRateLimiter } from '#lib/server/rate-limit.ts';
 import {
+	getWebsite,
+	getWebsiteForHost,
+	touchWebsite,
+	websiteOwnsHost
+} from '#lib/server/websites.ts';
+import {
 	CAMPAIGN_FIELDS,
 	isCtaPlacement,
 	isEventType,
-	isSiteId,
-	siteForHost,
+	SITE_KEY_PATTERN,
 	type Campaign,
 	type CampaignKey,
 	type CtaPlacement,
 	type EventType,
-	type SiteId
+	type Website
 } from '#lib/sites.ts';
-import { CORS_ALLOWED_ORIGINS } from '$app/env/private';
 import { waitUntil } from '@vercel/functions';
 import type { RequestHandler } from './$types';
+
+// Tracking endpoint for every registered website. Who may send is decided here, on the server,
+// from the website registry (src/lib/server/websites.ts): the site key must belong to an enabled
+// website, and the page (and the browser's Origin, when sent) must be on one of its domains. CORS
+// headers only let browsers read the reply; they are not what protects this endpoint.
 
 // Two page URLs (the lead's and its source CTA's) plus campaign parameters fit comfortably.
 const MAX_BODY_BYTES = 8192;
@@ -37,12 +46,18 @@ const MAX_CLOCK_SKEW_FUTURE_MS = 5 * 60_000;
 // covers clock differences and slow form plugins.
 const MAX_SOURCE_AGE_MS = 35 * 60_000;
 
-// Each accepted click writes a row and sends an email, so cap clicks per visitor IP. A real
-// visitor never clicks 30 CTAs a minute; a script hammering the endpoint does.
-const rateLimit = createRateLimiter({ limit: 30, windowMs: 60_000 });
+// Each accepted lead writes a row and sends an email, so cap leads per visitor IP (a real visitor
+// never makes 30 a minute) and per website (one site can't flood the database or Gmail quota).
+// Install pings write nothing but "last seen", so they have their own, looser per-IP limit.
+// Per function instance, best effort (see rate-limit.ts).
+const leadsPerIp = createRateLimiter({ limit: 30, windowMs: 60_000 });
+const leadsPerWebsite = createRateLimiter({ limit: 300, windowMs: 60_000 });
+const pingsPerIp = createRateLimiter({ limit: 60, windowMs: 60_000 });
 
 type ClickPayload = {
+	/** The website's site key. Very old snippets send none; their page's domain decides. */
 	site?: unknown;
+	/** 'cta_click' | 'form_submit', or 'ping' (installation check; not stored as a lead). */
 	eventType?: unknown;
 	buttonType?: unknown;
 	buttonText?: unknown;
@@ -78,13 +93,21 @@ const NO_SOURCE: SourceCta = {
 
 class ValidationError extends Error {}
 
-function isAllowedOrigin(origin: string | null): origin is string {
-	return origin !== null && CORS_ALLOWED_ORIGINS.includes(origin);
+function hostOf(origin: string | null): string | null {
+	if (!origin) return null;
+	try {
+		return new URL(origin).hostname;
+	} catch {
+		return null;
+	}
 }
 
-function corsHeaders(origin: string | null): Headers {
+/** CORS headers for an Origin registered to an enabled website (from the cached registry). */
+async function corsHeaders(origin: string | null): Promise<Headers> {
 	const headers = new Headers({ Vary: 'Origin' });
-	if (isAllowedOrigin(origin)) {
+	const host = hostOf(origin);
+	const website = host ? await getWebsiteForHost(host) : undefined;
+	if (origin && website && !website.disabled) {
 		headers.set('Access-Control-Allow-Origin', origin);
 		headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
 		headers.set('Access-Control-Allow-Headers', 'Content-Type');
@@ -111,27 +134,7 @@ function parsePageUrl(value: unknown): URL {
 	if (url.protocol !== 'http:' && url.protocol !== 'https:') {
 		throw new ValidationError('pageUrl must be an absolute http(s) URL');
 	}
-	// Only record pages that belong to the configured WordPress site(s).
-	if (!CORS_ALLOWED_ORIGINS.includes(url.origin)) {
-		throw new ValidationError('pageUrl must belong to an allowed site');
-	}
 	return url;
-}
-
-/**
- * The page's domain decides the site when it is one of the configured production domains, so a
- * snippet pasted on the wrong site can't mislabel leads. Otherwise (staging or temporary domains
- * that are in CORS_ALLOWED_ORIGINS) the snippet's own identifier is used. Old snippets send none.
- */
-function resolveSite(value: unknown, pageUrl: URL): SiteId | null {
-	if (value !== undefined && value !== null && !isSiteId(value)) {
-		throw new ValidationError('site must be a known site identifier');
-	}
-	const byHost = siteForHost(pageUrl.hostname);
-	if (byHost && value && byHost.id !== value) {
-		console.warn(`Snippet for "${value}" is running on ${pageUrl.host}; recording as ${byHost.id}`);
-	}
-	return byHost?.id ?? value ?? null;
 }
 
 function parseEventType(value: unknown): EventType {
@@ -197,8 +200,8 @@ function parsePlacement(value: unknown): CtaPlacement | null {
 	return isCtaPlacement(value) ? value : null;
 }
 
-/** The CTA a form submission is credited to, if it was clicked on this site in the last 30 minutes. */
-function parseSource(value: unknown, now: Date): SourceCta {
+/** The CTA a form submission is credited to, if it was clicked on this website in the last 30 minutes. */
+function parseSource(value: unknown, now: Date, website: Website): SourceCta {
 	const source = asRecord(value);
 	if (!source) return NO_SOURCE;
 
@@ -211,7 +214,8 @@ function parseSource(value: unknown, now: Date): SourceCta {
 
 	let pageUrl: string | null = null;
 	try {
-		pageUrl = parsePageUrl(source.pageUrl).href;
+		const url = parsePageUrl(source.pageUrl);
+		if (websiteOwnsHost(website, url.hostname)) pageUrl = url.href;
 	} catch {
 		// Keep the rest of the source without a page.
 	}
@@ -240,30 +244,57 @@ function parseAttribution(value: unknown): Campaign {
 	return campaign;
 }
 
-export const OPTIONS: RequestHandler = ({ request }) => {
+/**
+ * The website this event belongs to, or a reason to refuse it: the site key must name an enabled
+ * website, and the page and the Origin (browsers always send it cross-origin) must be on one of
+ * that website's domains. Snippets without a site key are matched by the page's domain.
+ */
+async function resolveWebsite(
+	siteKey: unknown,
+	pageUrl: URL,
+	origin: string | null
+): Promise<{ website: Website } | { status: 400 | 403; error: string }> {
+	if (siteKey !== undefined && siteKey !== null) {
+		if (typeof siteKey !== 'string' || !SITE_KEY_PATTERN.test(siteKey)) {
+			return { status: 400, error: 'site must be a site key' };
+		}
+	}
+	const website = siteKey
+		? await getWebsite(siteKey as string)
+		: await getWebsiteForHost(pageUrl.hostname);
+	if (!website) return { status: 403, error: 'Unknown website' };
+	if (website.disabled) return { status: 403, error: 'Website is disabled' };
+	if (!websiteOwnsHost(website, pageUrl.hostname)) {
+		console.warn(`Event for "${website.key}" from unregistered page host ${pageUrl.host}`);
+		return { status: 403, error: 'pageUrl is not on a domain registered for this website' };
+	}
+	const originHost = hostOf(origin);
+	if (origin && (!originHost || !websiteOwnsHost(website, originHost))) {
+		return { status: 403, error: 'Origin is not a domain registered for this website' };
+	}
+	return { website };
+}
+
+export const OPTIONS: RequestHandler = async ({ request }) => {
 	const origin = request.headers.get('origin');
+	const headers = await corsHeaders(origin);
 	return new Response(null, {
-		status: isAllowedOrigin(origin) ? 204 : 403,
-		headers: corsHeaders(origin)
+		status: headers.has('Access-Control-Allow-Origin') ? 204 : 403,
+		headers
 	});
 };
 
 export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 	const origin = request.headers.get('origin');
-	const headers = corsHeaders(origin);
+	const headers = await corsHeaders(origin);
 
-	// Browsers always send Origin on cross-origin POSTs; reject ones from sites we don't serve.
-	if (origin && !isAllowedOrigin(origin)) {
+	// Browsers always send Origin on cross-origin POSTs: refuse unregistered ones before reading
+	// the body. (Requests without Origin, i.e. not from a browser, are checked below like any other.)
+	if (origin && !headers.has('Access-Control-Allow-Origin')) {
 		return json({ error: 'Origin not allowed' }, 403, headers);
 	}
 
-	const limited = rateLimit(getClientAddress());
-	if (!limited.allowed) {
-		headers.set('Retry-After', String(limited.retryAfterSeconds));
-		return json({ error: 'Too many requests' }, 429, headers);
-	}
-
-	// Accept both application/json (fetch) and text/plain (navigator.sendBeacon); parse as JSON either way.
+	// Accept both application/json and text/plain (what the tracker sends); parse as JSON either way.
 	const raw = await request.text();
 	if (raw.length > MAX_BODY_BYTES) {
 		return json({ error: 'Payload too large' }, 413, headers);
@@ -280,14 +311,47 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 		return json({ error: 'Body must be valid JSON' }, 400, headers);
 	}
 
+	const isPing = payload.eventType === 'ping';
+	const ip = getClientAddress();
+	const limited = (isPing ? pingsPerIp : leadsPerIp)(ip);
+	if (!limited.allowed) {
+		headers.set('Retry-After', String(limited.retryAfterSeconds));
+		return json({ error: 'Too many requests' }, 429, headers);
+	}
+
+	let pageUrl: URL;
+	try {
+		pageUrl = parsePageUrl(payload.pageUrl);
+	} catch (error) {
+		if (error instanceof ValidationError) return json({ error: error.message }, 400, headers);
+		throw error;
+	}
+
+	const resolved = await resolveWebsite(payload.site, pageUrl, origin);
+	if (!('website' in resolved)) return json({ error: resolved.error }, resolved.status, headers);
+	const { website } = resolved;
+
+	// Installation check from the tracking script: update "last seen", store nothing else.
+	if (isPing) {
+		const ok = await touchWebsite(website.key, pageUrl.hostname, pageUrl.href, { throttle: true });
+		return ok
+			? new Response(null, { status: 204, headers })
+			: json({ error: 'Website is disabled' }, 403, headers);
+	}
+
+	const perWebsite = leadsPerWebsite(website.key);
+	if (!perWebsite.allowed) {
+		headers.set('Retry-After', String(perWebsite.retryAfterSeconds));
+		return json({ error: 'Too many requests' }, 429, headers);
+	}
+
 	const geo = geoFromHeaders(request.headers);
 	let values: typeof ctaClicks.$inferInsert;
 	try {
-		const pageUrl = parsePageUrl(payload.pageUrl);
 		const eventType = parseEventType(payload.eventType);
 		const now = new Date();
 		values = {
-			site: resolveSite(payload.site, pageUrl),
+			site: website.key,
 			eventType,
 			buttonType: parseButtonType(payload.buttonType),
 			buttonText: parseLabel(payload.buttonText, 'buttonText'),
@@ -299,7 +363,7 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 			clickedAt: parseClickedAt(payload.clickedAt, now),
 			// A CTA click has its own placement; a form submission is credited to an earlier CTA.
 			ctaPlacement: eventType === 'cta_click' ? parsePlacement(payload.placement) : null,
-			...(eventType === 'form_submit' ? parseSource(payload.source, now) : NO_SOURCE),
+			...(eventType === 'form_submit' ? parseSource(payload.source, now, website) : NO_SOURCE),
 			...parseAttribution(payload.attribution)
 		};
 	} catch (error) {
@@ -309,6 +373,11 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 
 	let click: typeof ctaClicks.$inferSelect;
 	try {
+		// The database has the final say on "enabled and owns this domain" (the cache can be up to a
+		// minute old on other instances), and this also records the website as seen.
+		if (!(await touchWebsite(website.key, pageUrl.hostname, pageUrl.href))) {
+			return json({ error: 'Website is disabled' }, 403, headers);
+		}
 		[click] = await db.insert(ctaClicks).values(values).returning();
 	} catch (error) {
 		console.error('Failed to record CTA click', error);
@@ -319,6 +388,7 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 	waitUntil(
 		sendCtaClickNotification({
 			...click,
+			siteName: website.name,
 			country: geo.country,
 			userAgent: request.headers.get('user-agent')?.slice(0, 300) ?? null
 		})

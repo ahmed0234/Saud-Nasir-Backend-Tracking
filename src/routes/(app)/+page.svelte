@@ -3,6 +3,8 @@
 	import { showDeleted } from '#lib/components/dashboard/deleted-pop.svelte';
 	import LeadRow from '#lib/components/dashboard/lead-row.svelte';
 	import PageHeader from '#lib/components/dashboard/page-header.svelte';
+	import InstallStatus from '#lib/components/dashboard/install-status.svelte';
+	import { openWebsiteDialog } from '#lib/components/dashboard/website-dialog.svelte';
 	import SiteBadge from '#lib/components/dashboard/site-badge.svelte';
 	import StatCard from '#lib/components/dashboard/stat-card.svelte';
 	import StateMessage from '#lib/components/dashboard/state-message.svelte';
@@ -10,10 +12,11 @@
 	import { Checkbox } from '#lib/components/ui/checkbox/index.js';
 	import { formatDateTime, formatNumber } from '#lib/format.ts';
 	import type { RecentClick } from '#lib/server/analytics.ts';
-	import { EVENT_TYPE_LABELS, getSite, isEventType, SITE_URL_PARAM } from '#lib/sites.ts';
+	import { EVENT_TYPE_LABELS, findWebsite, isEventType, SITE_URL_PARAM } from '#lib/sites.ts';
 	import { cn } from '#lib/utils.js';
 	import ChartLineIcon from '@lucide/svelte/icons/chart-line';
 	import ClipboardListIcon from '@lucide/svelte/icons/clipboard-list';
+	import CodeIcon from '@lucide/svelte/icons/code';
 	import InboxIcon from '@lucide/svelte/icons/inbox';
 	import Loader2Icon from '@lucide/svelte/icons/loader-2';
 	import MailIcon from '@lucide/svelte/icons/mail';
@@ -124,7 +127,7 @@
 		}
 	}
 
-	const site = $derived(getSite(data.site));
+	const site = $derived(findWebsite(data.websites, data.site));
 	const summary = $derived(data.dashboard?.summary);
 	const recent = $derived((data.dashboard?.recent ?? []).filter((lead) => !removed.has(lead.id)));
 	// Only rows still on screen count as selected (a refresh can drop older ones off the list).
@@ -156,11 +159,12 @@
 		title={site?.name ?? 'All websites'}
 		description={site
 			? `CTA clicks and form submissions from ${site.name}, recorded in real time.`
-			: 'CTA clicks and form submissions from all three websites, recorded in real time.'}
+			: 'CTA clicks and form submissions from all your websites, recorded in real time.'}
 	>
 		{#snippet eyebrow()}
 			<span class="font-medium tracking-wider uppercase">Overview</span>
 			<SiteBadge siteId={data.site} />
+			{#if site}<InstallStatus website={site} timeZone={data.timeZone} />{/if}
 		{/snippet}
 		{#snippet actions()}
 			<form
@@ -212,6 +216,28 @@
 			</Button>
 		{/snippet}
 	</PageHeader>
+
+	{#if site && !site.disabled && !site.lastSeenAt}
+		<div
+			class="flex flex-col gap-3 rounded-2xl bg-amber-500/[0.07] px-5 py-4 ring-1 ring-amber-500/25 sm:flex-row sm:items-center sm:justify-between"
+			role="status"
+		>
+			<div class="space-y-0.5">
+				<p class="font-medium">Waiting for the tracking code</p>
+				<p class="text-sm text-muted-foreground">
+					Install it on {site.name} once. This page shows leads as soon as the website sends its first
+					event.
+				</p>
+			</div>
+			<Button
+				class="shrink-0"
+				onclick={() => openWebsiteDialog({ mode: 'install', key: site.key })}
+			>
+				<CodeIcon />
+				View install code
+			</Button>
+		</div>
+	{/if}
 
 	{#if data.error || !summary}
 		<div class="rounded-2xl glass">

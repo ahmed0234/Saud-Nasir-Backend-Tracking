@@ -1,7 +1,7 @@
 import { getDashboard } from '#lib/server/analytics.ts';
 import { deleteLeadsById, MAX_DELETE_IDS, parseLeadIds } from '#lib/server/delete-leads.ts';
 import { sendTestEmail } from '#lib/server/email/index.ts';
-import { siteFromUrl } from '#lib/sites.ts';
+import { selectedSite } from '#lib/server/websites.ts';
 import { resolveTimeZone, TIME_ZONE_COOKIE } from '#lib/timezone.ts';
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
@@ -14,7 +14,7 @@ let lastTestEmailAt = 0;
 export const load: PageServerLoad = async ({ url, cookies, setHeaders }) => {
 	setHeaders({ 'cache-control': 'no-store' });
 	const timeZone = resolveTimeZone(cookies.get(TIME_ZONE_COOKIE));
-	const site = siteFromUrl(url);
+	const site = await selectedSite(url).catch(() => null);
 
 	try {
 		return { site, dashboard: await getDashboard(timeZone, site), error: null };
@@ -26,8 +26,6 @@ export const load: PageServerLoad = async ({ url, cookies, setHeaders }) => {
 
 export const actions: Actions = {
 	sendTestEmail: async ({ request, url }) => {
-		// csrf.trustedOrigins also admits the WordPress site (for tracking beacons), so require
-		// this action to come from the dashboard itself.
 		if (request.headers.get('origin') !== url.origin) {
 			return fail(403, { message: 'Test emails can only be sent from this dashboard.' });
 		}

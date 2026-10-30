@@ -1,11 +1,12 @@
 <script lang="ts">
 	import AppSidebar from '#lib/components/dashboard/app-sidebar.svelte';
 	import DeletedPop from '#lib/components/dashboard/deleted-pop.svelte';
+	import WebsiteDialog from '#lib/components/dashboard/website-dialog.svelte';
 	import OpeningIntro from '#lib/components/dashboard/opening-intro.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Sheet from '#lib/components/ui/sheet/index.js';
 	import * as Tooltip from '#lib/components/ui/tooltip/index.js';
-	import { getSite, siteFromUrl } from '#lib/sites.ts';
+	import { findWebsite, siteFromUrl } from '#lib/sites.ts';
 	import ActivityIcon from '@lucide/svelte/icons/activity';
 	import MenuIcon from '@lucide/svelte/icons/menu';
 	import { afterNavigate } from '$app/navigation';
@@ -16,14 +17,16 @@
 
 	let mobileNavOpen = $state(false);
 
-	const site = $derived(getSite(siteFromUrl(page.url)));
+	const site = $derived(findWebsite(data.websites, siteFromUrl(page.url)));
 	// Where a pending navigation is heading; the progress bar takes that site's colour right away.
-	const nextSite = $derived(navigating.to ? getSite(siteFromUrl(navigating.to.url)) : site);
+	const nextSite = $derived(
+		navigating.to ? findWebsite(data.websites, siteFromUrl(navigating.to.url)) : site
+	);
 
 	// A view is one page for one website. Changing it (not a filter) runs the view transition in
 	// layout.css: the current view dims while the next one loads, then the new one staggers in.
 	const viewKeyFor = (url: { pathname: string } & Parameters<typeof siteFromUrl>[0]) =>
-		`${url.pathname}|${getSite(siteFromUrl(url))?.id ?? 'all'}`;
+		`${url.pathname}|${findWebsite(data.websites, siteFromUrl(url))?.key ?? 'all'}`;
 	const viewKey = $derived(viewKeyFor(page.url));
 	const leaving = $derived(!!navigating.to && viewKeyFor(navigating.to.url) !== viewKey);
 
@@ -34,6 +37,7 @@
 
 <OpeningIntro />
 <DeletedPop />
+<WebsiteDialog />
 
 <div aria-hidden="true" class="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
 	<div
@@ -59,7 +63,7 @@
 			class="sticky top-4 hidden h-[calc(100svh-2rem)] w-64 shrink-0 overflow-y-auto rounded-3xl glass lg:block"
 			aria-label="Sidebar"
 		>
-			<AppSidebar siteCounts={data.siteCounts} />
+			<AppSidebar siteCounts={data.siteCounts} websites={data.websites} />
 		</aside>
 
 		<div class="flex min-w-0 flex-1 flex-col gap-3">
@@ -83,7 +87,11 @@
 							<Sheet.Title>Navigation</Sheet.Title>
 							<Sheet.Description>Choose a website and a view.</Sheet.Description>
 						</Sheet.Header>
-						<AppSidebar siteCounts={data.siteCounts} />
+						<AppSidebar
+							siteCounts={data.siteCounts}
+							websites={data.websites}
+							onAddWebsite={() => (mobileNavOpen = false)}
+						/>
 					</Sheet.Content>
 				</Sheet.Root>
 				<span

@@ -9,13 +9,14 @@
 	import { placementLabel } from '#lib/lead-attribution.ts';
 	import PageHeader from '#lib/components/dashboard/page-header.svelte';
 	import RankedList from '#lib/components/dashboard/ranked-list.svelte';
+	import InstallStatus from '#lib/components/dashboard/install-status.svelte';
 	import SiteBadge from '#lib/components/dashboard/site-badge.svelte';
 	import StatCard from '#lib/components/dashboard/stat-card.svelte';
 	import StateMessage from '#lib/components/dashboard/state-message.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { PRESETS, toLocalIsoDate } from '#lib/date-range.ts';
 	import { formatDateTime, formatNumber, formatPercent, splitUrl } from '#lib/format.ts';
-	import { buttonTypeLabel, EVENT_TYPE_LABELS, getSite, isEventType } from '#lib/sites.ts';
+	import { buttonTypeLabel, EVENT_TYPE_LABELS, findWebsite, isEventType } from '#lib/sites.ts';
 	import { cn } from '#lib/utils.js';
 	import ArrowDownRightIcon from '@lucide/svelte/icons/arrow-down-right';
 	import ArrowUpRightIcon from '@lucide/svelte/icons/arrow-up-right';
@@ -41,7 +42,7 @@
 	let refreshing = $state(false);
 	const loading = $derived(refreshing || navigating.to?.route.id === '/(app)/analytics');
 
-	const site = $derived(getSite(data.site));
+	const site = $derived(findWebsite(data.websites, data.site));
 	const analytics = $derived(data.analytics);
 	const eventLabel = (value: string) => (isEventType(value) ? EVENT_TYPE_LABELS[value] : value);
 	const summary = $derived(analytics?.summary);
@@ -131,6 +132,7 @@
 		{#snippet eyebrow()}
 			<span class="font-medium tracking-wider uppercase">Analytics</span>
 			<SiteBadge siteId={data.site} />
+			{#if site}<InstallStatus website={site} timeZone={data.timeZone} />{/if}
 		{/snippet}
 		{#snippet actions()}
 			<DateRangeFilter
@@ -364,7 +366,7 @@
 						total={summary.total}
 					>
 						{#snippet label(item)}
-							{@const itemSite = getSite(item.site)}
+							{@const itemSite = findWebsite(data.websites, item.site)}
 							<span class="inline-flex items-center gap-2 font-medium">
 								<span
 									class="size-2 rounded-full"
