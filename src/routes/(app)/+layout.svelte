@@ -1,5 +1,6 @@
 <script lang="ts">
 	import AppSidebar from '#lib/components/dashboard/app-sidebar.svelte';
+	import DeletedPop from '#lib/components/dashboard/deleted-pop.svelte';
 	import OpeningIntro from '#lib/components/dashboard/opening-intro.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Sheet from '#lib/components/ui/sheet/index.js';
@@ -32,6 +33,7 @@
 </script>
 
 <OpeningIntro />
+<DeletedPop />
 
 <div aria-hidden="true" class="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
 	<div

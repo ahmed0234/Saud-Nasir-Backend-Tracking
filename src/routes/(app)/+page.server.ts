@@ -1,4 +1,5 @@
 import { getDashboard } from '#lib/server/analytics.ts';
+import { deleteLeadsById, MAX_DELETE_IDS, parseLeadIds } from '#lib/server/delete-leads.ts';
 import { sendTestEmail } from '#lib/server/email/index.ts';
 import { siteFromUrl } from '#lib/sites.ts';
 import { resolveTimeZone, TIME_ZONE_COOKIE } from '#lib/timezone.ts';
@@ -42,5 +43,25 @@ export const actions: Actions = {
 		const result = await sendTestEmail();
 		if (!result.ok) return fail(502, { message: result.message });
 		return { message: `Test email sent to ${result.recipients.join(', ')}.` };
+	},
+
+	/** Permanently deletes the leads whose ids are posted as `id` fields. */
+	deleteLeads: async ({ request, url }) => {
+		if (request.headers.get('origin') !== url.origin) {
+			return fail(403, { message: 'Leads can only be deleted from this dashboard.' });
+		}
+
+		const ids = parseLeadIds((await request.formData()).getAll('id'));
+		if (!ids || ids.length === 0) return fail(400, { message: 'No valid leads were selected.' });
+		if (ids.length > MAX_DELETE_IDS) {
+			return fail(400, { message: `Delete at most ${MAX_DELETE_IDS} leads at a time.` });
+		}
+
+		try {
+			return { deleted: await deleteLeadsById(ids) };
+		} catch (error) {
+			console.error('Failed to delete leads', error);
+			return fail(500, { message: 'Could not delete the leads from the database.' });
+		}
 	}
 };

@@ -1,12 +1,16 @@
 <script lang="ts">
+	import ConfirmDeleteDialog from '#lib/components/dashboard/confirm-delete-dialog.svelte';
+	import { showDeleted } from '#lib/components/dashboard/deleted-pop.svelte';
 	import LeadRow from '#lib/components/dashboard/lead-row.svelte';
 	import PageHeader from '#lib/components/dashboard/page-header.svelte';
 	import SiteBadge from '#lib/components/dashboard/site-badge.svelte';
 	import StatCard from '#lib/components/dashboard/stat-card.svelte';
 	import StateMessage from '#lib/components/dashboard/state-message.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
+	import { Checkbox } from '#lib/components/ui/checkbox/index.js';
 	import { formatDateTime, formatNumber } from '#lib/format.ts';
-	import { getSite, SITE_URL_PARAM } from '#lib/sites.ts';
+	import type { RecentClick } from '#lib/server/analytics.ts';
+	import { EVENT_TYPE_LABELS, getSite, isEventType, SITE_URL_PARAM } from '#lib/sites.ts';
 	import { cn } from '#lib/utils.js';
 	import ChartLineIcon from '@lucide/svelte/icons/chart-line';
 	import ClipboardListIcon from '@lucide/svelte/icons/clipboard-list';
@@ -17,10 +21,17 @@
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import ServerCrashIcon from '@lucide/svelte/icons/server-crash';
 	import SunIcon from '@lucide/svelte/icons/sun';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import UsersIcon from '@lucide/svelte/icons/users';
+	import XIcon from '@lucide/svelte/icons/x';
 	import { enhance } from '$app/forms';
 	import { refreshAll } from '$app/navigation';
 	import { resolve } from '$app/paths';
+	import type { ActionResult } from '$app/forms';
+	import { cubicOut } from 'svelte/easing';
+	import { prefersReducedMotion } from 'svelte/motion';
+	import { SvelteSet } from 'svelte/reactivity';
+	import { fly } from 'svelte/transition';
 	import { toast } from 'svelte-sonner';
 	import type { PageProps } from './$types';
 
@@ -28,6 +39,80 @@
 
 	let refreshing = $state(false);
 	let sendingTest = $state(false);
+
+	// Selection and deletion. Deleted rows are hidden as soon as the server confirms (playing their
+	// exit animation), before the refresh that updates the stats and sidebar counts lands.
+	const selected = new SvelteSet<string>();
+	const removed = new SvelteSet<string>();
+	let deleteOpen = $state(false);
+	let deleteTarget = $state<{ ids: string[]; title: string; description: string }>({
+		ids: [],
+		title: '',
+		description: ''
+	});
+
+	function askDelete(leads: RecentClick[]) {
+		if (leads.length === 0) return;
+		const [first] = leads;
+		deleteTarget =
+			leads.length === 1
+				? {
+						ids: [first.id],
+						title: 'Delete this lead?',
+						description: `The ${leadSummary(first)} from ${formatDateTime(first.clickedAt, data.timeZone)} will be permanently deleted from the database. This can't be undone.`
+					}
+				: {
+						ids: leads.map((lead) => lead.id),
+						title: `Delete ${formatNumber(leads.length)} leads?`,
+						description: `The ${formatNumber(leads.length)} selected leads will be permanently deleted from the database. This can't be undone.`
+					};
+		deleteOpen = true;
+	}
+
+	function leadSummary(lead: RecentClick) {
+		const kind = isEventType(lead.eventType) ? EVENT_TYPE_LABELS[lead.eventType] : 'lead';
+		const label = lead.buttonText ?? lead.formName;
+		return `${kind.toLowerCase()}${label ? ` “${label}”` : ''}`;
+	}
+
+	async function onDeleteResult(result: ActionResult) {
+		if (result.type === 'success') {
+			const deleted = Number(result.data?.deleted ?? 0);
+			for (const id of deleteTarget.ids) {
+				removed.add(id);
+				selected.delete(id);
+			}
+			deleteOpen = false;
+			if (deleted > 0) showDeleted(deleted);
+			else toast.info('Nothing to delete', { description: 'These leads were already deleted.' });
+			await refresh();
+			removed.clear();
+		} else {
+			deleteOpen = false;
+			toast.error('Delete failed', {
+				description:
+					result.type === 'failure'
+						? String(result.data?.message ?? 'Please try again.')
+						: 'Unexpected server error. Nothing was deleted.'
+			});
+		}
+	}
+
+	// Collapses a deleted row: fades and slides it out while closing the gap it leaves.
+	function leaveRow(node: HTMLElement) {
+		const height = node.offsetHeight;
+		return {
+			duration: prefersReducedMotion.current ? 0 : 320,
+			easing: cubicOut,
+			css: (t: number) => `
+				overflow: hidden;
+				opacity: ${t};
+				height: ${t * height}px;
+				margin-bottom: ${(t - 1) * 8}px;
+				transform: translateX(${(1 - t) * -16}px) scale(${0.98 + t * 0.02});
+			`
+		};
+	}
 
 	async function refresh() {
 		if (refreshing) return;
@@ -41,7 +126,20 @@
 
 	const site = $derived(getSite(data.site));
 	const summary = $derived(data.dashboard?.summary);
-	const recent = $derived(data.dashboard?.recent ?? []);
+	const recent = $derived((data.dashboard?.recent ?? []).filter((lead) => !removed.has(lead.id)));
+	// Only rows still on screen count as selected (a refresh can drop older ones off the list).
+	const selectedLeads = $derived(recent.filter((lead) => selected.has(lead.id)));
+	const allSelected = $derived(recent.length > 0 && selectedLeads.length === recent.length);
+
+	function toggleAll(checked: boolean) {
+		selected.clear();
+		if (checked) for (const lead of recent) selected.add(lead.id);
+	}
+
+	function toggleLead(id: string, checked: boolean) {
+		if (checked) selected.add(id);
+		else selected.delete(id);
+	}
 	const analyticsHref = $derived(
 		data.site
 			? resolve(`analytics?${new URLSearchParams({ [SITE_URL_PARAM]: data.site })}`)
@@ -183,6 +281,40 @@
 					description="Leads appear here as soon as the website's snippet sends them to /api/cta-click."
 				/>
 			{:else}
+				<div
+					class={cn(
+						'mx-3 mb-2 flex min-h-11 flex-wrap items-center justify-between gap-2 rounded-xl px-3 py-1.5 transition-colors sm:px-4',
+						selectedLeads.length > 0 && 'bg-foreground/[0.05]'
+					)}
+				>
+					<label class="flex cursor-pointer items-center gap-3 text-sm select-none">
+						<Checkbox
+							checked={allSelected}
+							indeterminate={selectedLeads.length > 0 && !allSelected}
+							onCheckedChange={toggleAll}
+							aria-label="Select all leads shown"
+						/>
+						{#if selectedLeads.length > 0}
+							<span class="font-medium tabular-nums">
+								{formatNumber(selectedLeads.length)} of {formatNumber(recent.length)} selected
+							</span>
+						{:else}
+							<span class="text-muted-foreground">Select all</span>
+						{/if}
+					</label>
+					{#if selectedLeads.length > 0}
+						<div class="flex items-center gap-1.5" transition:fly={{ x: 8, duration: 180 }}>
+							<Button variant="ghost" size="sm" onclick={() => selected.clear()}>
+								<XIcon />
+								Clear
+							</Button>
+							<Button variant="destructive" size="sm" onclick={() => askDelete(selectedLeads)}>
+								<Trash2Icon />
+								Delete {formatNumber(selectedLeads.length)}
+							</Button>
+						</div>
+					{/if}
+				</div>
 				<ul
 					class={cn('flex flex-col gap-2 px-3 pb-3 transition-opacity', refreshing && 'opacity-60')}
 				>
@@ -190,8 +322,16 @@
 						<li
 							class="animate-in duration-500 ease-out fade-in-0 fill-mode-backwards slide-in-from-bottom-2 motion-reduce:animate-none"
 							style:animation-delay="{Math.min(index, 12) * 35}ms"
+							out:leaveRow
 						>
-							<LeadRow {lead} timeZone={data.timeZone} showSite={!site} />
+							<LeadRow
+								{lead}
+								timeZone={data.timeZone}
+								showSite={!site}
+								selected={selected.has(lead.id)}
+								onSelectedChange={(checked) => toggleLead(lead.id, checked)}
+								onDelete={() => askDelete([lead])}
+							/>
 						</li>
 					{/each}
 				</ul>
@@ -199,3 +339,13 @@
 		</section>
 	{/if}
 </div>
+
+<ConfirmDeleteDialog
+	bind:open={deleteOpen}
+	title={deleteTarget.title}
+	description={deleteTarget.description}
+	confirmLabel={deleteTarget.ids.length === 1 ? 'Delete lead' : `Delete ${deleteTarget.ids.length}`}
+	action="?/deleteLeads"
+	fields={deleteTarget.ids.map((id) => ['id', id])}
+	onresult={onDeleteResult}
+/>

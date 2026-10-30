@@ -1,7 +1,9 @@
 <script lang="ts">
 	import ClicksAreaChart from '#lib/components/dashboard/clicks-area-chart.svelte';
 	import ClicksBarChart from '#lib/components/dashboard/clicks-bar-chart.svelte';
+	import ConfirmDeleteDialog from '#lib/components/dashboard/confirm-delete-dialog.svelte';
 	import DateRangeFilter from '#lib/components/dashboard/date-range-filter.svelte';
+	import { showDeleted } from '#lib/components/dashboard/deleted-pop.svelte';
 	import PageHeader from '#lib/components/dashboard/page-header.svelte';
 	import RankedList from '#lib/components/dashboard/ranked-list.svelte';
 	import SiteBadge from '#lib/components/dashboard/site-badge.svelte';
@@ -24,8 +26,11 @@
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import ServerCrashIcon from '@lucide/svelte/icons/server-crash';
+	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import { refreshAll } from '$app/navigation';
 	import { navigating } from '$app/state';
+	import type { ActionResult } from '$app/forms';
+	import { toast } from 'svelte-sonner';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -51,6 +56,54 @@
 		if (!summary || summary.previousTotal === 0) return null;
 		return (summary.total - summary.previousTotal) / summary.previousTotal;
 	});
+
+	// Deleting the selected range removes exactly the leads counted on screen: the range's start,
+	// up to its end or the moment the page loaded, whichever is earlier (a range ending today
+	// mustn't take leads that arrived after the numbers were shown).
+	let deleteOpen = $state(false);
+	const deleteEnd = $derived(
+		data.range.end && Date.parse(data.range.end) > Date.parse(data.loadedAt)
+			? data.loadedAt
+			: data.range.end
+	);
+	const deleteDescription = $derived.by(() => {
+		if (!summary || !data.range.start || !deleteEnd) return '';
+		const leads = summary.total === 1 ? 'The 1 lead' : `All ${formatNumber(summary.total)} leads`;
+		const source = site ? `from ${site.name}` : 'from all websites';
+		let period: string;
+		if (data.range.key === 'custom') {
+			const from = dayFormatter.format(new Date(data.range.from));
+			const to = dayFormatter.format(new Date(data.range.to));
+			period = `${from === to ? `on ${from}` : `from ${from} through ${to}`} (whole days, ${data.timeZone})`;
+		} else {
+			period = `in the ${rangeLabel} (since ${formatDateTime(data.range.start, data.timeZone)}, ${data.timeZone})`;
+		}
+		return `${leads} ${source} ${period} will be permanently deleted from the database. This can't be undone.`;
+	});
+	// `from`/`to` are calendar dates (YYYY-MM-DD), so format them as UTC to keep the same day.
+	const dayFormatter = new Intl.DateTimeFormat('en-US', {
+		timeZone: 'UTC',
+		month: 'short',
+		day: 'numeric',
+		year: 'numeric'
+	});
+
+	async function onDeleteResult(result: ActionResult) {
+		deleteOpen = false;
+		if (result.type === 'success') {
+			const deleted = Number(result.data?.deleted ?? 0);
+			if (deleted > 0) showDeleted(deleted);
+			else toast.info('Nothing to delete', { description: 'There are no leads in this range.' });
+			await refresh();
+		} else {
+			toast.error('Delete failed', {
+				description:
+					result.type === 'failure'
+						? String(result.data?.message ?? 'Please try again.')
+						: 'Unexpected server error. Nothing was deleted.'
+			});
+		}
+	}
 
 	async function refresh() {
 		if (refreshing) return;
@@ -97,12 +150,25 @@
 		{/snippet}
 	</PageHeader>
 
-	<div class="flex min-h-5 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+	<div class="flex min-h-8 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
 		{#if rangeText}<span>{rangeText} · {data.timeZone}</span>{/if}
 		{#if loading}
 			<span class="inline-flex items-center gap-1.5" role="status">
 				<Loader2Icon class="size-3 animate-spin" /> Updating…
 			</span>
+		{/if}
+		{#if summary && summary.total > 0 && deleteDescription}
+			<Button
+				variant="ghost"
+				size="sm"
+				class="ml-auto text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+				onclick={() => (deleteOpen = true)}
+				disabled={loading}
+			>
+				<Trash2Icon />
+				Delete {formatNumber(summary.total)}
+				{summary.total === 1 ? 'lead' : 'leads'} in this range
+			</Button>
 		{/if}
 	</div>
 
@@ -314,3 +380,17 @@
 		</div>
 	{/if}
 </div>
+
+<ConfirmDeleteDialog
+	bind:open={deleteOpen}
+	title={`Delete ${formatNumber(summary?.total ?? 0)} ${summary?.total === 1 ? 'lead' : 'leads'}?`}
+	description={deleteDescription}
+	confirmLabel="Delete all in range"
+	action="?/deleteRange"
+	fields={[
+		['start', data.range.start ?? ''],
+		['end', deleteEnd ?? ''],
+		['site', data.site ?? '']
+	]}
+	onresult={onDeleteResult}
+/>

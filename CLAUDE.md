@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project overview
 
-One central backend that tracks leads from **three WordPress websites** (Platinum SG, Clean Master, EMG Air). Each site runs its own copy of a global JavaScript snippet that sends the site's identifier; when a visitor clicks a CTA (phone, booking, email/SMS, Elementor button) or submits a lead form, the snippet POSTs to this backend, which stores it in Neon Postgres, emails a notification, and shows everything in a read-only analytics dashboard (`/` and `/analytics`, filterable per website from the sidebar, behind a sign-in at `/login`). It is not a CRM. Opening the dashboard must never create events or send email.
+One central backend that tracks leads from **three WordPress websites** (Platinum SG, Clean Master, EMG Air). Each site runs its own copy of a global JavaScript snippet that sends the site's identifier; when a visitor clicks a CTA (phone, booking, email/SMS, Elementor button) or submits a lead form, the snippet POSTs to this backend, which stores it in Neon Postgres, emails a notification, and shows everything in an analytics dashboard (`/` and `/analytics`, filterable per website from the sidebar, behind a sign-in at `/login`; leads can be deleted there, nothing else is edited). It is not a CRM. Opening the dashboard must never create events or send email.
 
 ```
 WordPress site A ─┐
@@ -42,18 +42,19 @@ One file per site, identical except for `var SITE = '...'` and the header; keep 
 - Caching/optimization plugins must not delay it (exclude from WP Rocket/LiteSpeed "delay JS"); clear caches after updating it.
 - Verified 2026-10-29 in headless Chrome (desktop and iPhone emulation) against saved copies of the real Platinum SG contact page, EMG Air contact page and Clean Master homepage.
 
-### Status (as of 2026-10-29)
+### Status (as of 2026-10-30)
 
 **Verified working:** live DB schema matches Drizzle (1 migration applied); end-to-end click → row → dashboard/analytics in a production build; CORS + CSRF behavior on the live endpoint for both allowed origins; Gmail sending locally and in a production build; test-email button; rate limiting; security headers deployed; snippet detection against the real Clean Master pages (simulated browser); user confirmed tracking works on the live sites.
 
-**Pending deploy steps for multi-site + form tracking:** run `bun run db:migrate` (migration `0001_add_site_and_lead_type`; additive and safe for the currently deployed code), set `CORS_ALLOWED_ORIGINS` in Vercel to include all three origins, redeploy, then install the three snippets.
+**Deploy steps for multi-site + form tracking (not confirmed done; ask the user before assuming):** run `bun run db:migrate` (migration `0001_add_site_and_lead_type`; additive and safe for the currently deployed code), set `CORS_ALLOWED_ORIGINS` in Vercel to include all three origins, redeploy, then install the three snippets.
 
 **Open items / not yet verified:**
 
-- **Auth env vars must be set in Vercel** (`AUTH_USERNAME`, `AUTH_PASSWORD` ≥ 12 chars, `AUTH_SECRET` ≥ 32 chars), then redeploy. Until then nobody can sign in to the dashboard; tracking keeps working. Built and verified locally 2026-10-30 (curl + headless Chrome), not yet deployed.
+- **Dashboard auth is deployed** (user signed in on the live dashboard 2026-10-30). It needs `AUTH_USERNAME`, `AUTH_PASSWORD` (≥ 12 chars) and `AUTH_SECRET` (≥ 32 chars) in Vercel; if any is missing or too short, the login form says sign-in is "not set up on the server" (that message also covers a too-short password) while tracking keeps working.
+- **Platinum SG homepage is not tracked** (static HTML, WPCode can't reach it). Agreed plan, not done: paste `platinum-sg-tracker.js` inline in a `<script>` before `</body>` of that HTML file (same origin, so no backend change); the user has to find who can edit that file.
 - Gmail delivery _from Vercel_ specifically (Google can block data-center logins; check for a security alert after the first production email).
 - Optional backend additions discussed but not built: `user_agent`/browser column (user-agent is already received, only emailed), first-party proxy for strict ad blockers, Vercel Firewall rate-limit rule.
-- The project is not a git repository yet. `.env.example` contains the user's real recipient address; replace it with a placeholder before pushing anywhere public.
+- The repo is on GitHub (`origin` = `ahmed0234/Saud-Nasir-Backend-Tracking`). `.env.example` still contains the user's real recipient address in `NOTIFICATION_EMAIL_TO`; replace it with a placeholder if the repo is or becomes public. Commit or push only when the user asks.
 - Testing in this repo leaves rows in the shared production database. Label test clicks clearly (e.g. a `__audit-test__` path) and delete them afterwards; never mix fake data with real data.
 
 ## Commands
@@ -99,6 +100,7 @@ These differ from older SvelteKit conventions, so don't assume SvelteKit 2 patte
 - **Dashboard:** the `(app)` layout has a glass sidebar (`#lib/components/dashboard/app-sidebar.svelte`; a Sheet below `lg`) listing All websites + the three sites with all-time counts (`getSiteCounts` in `(app)/+layout.server.ts`) and a sign-out button. The selected site lives in the `site` URL param; every analytics query takes it (`null` = all). Server `load` functions (no client-side DB access) call `src/lib/server/analytics.ts`, which does all aggregation in Postgres. `/analytics` filters live in URL params (`range=24h|3d|7d|30d|custom&from&to`). Time-series buckets come from `generate_series`, so empty periods are zero. UI uses the shadcn-svelte components in `src/lib/components/ui`, layerchart 2 via `ui/chart`, and app components in `src/lib/components/dashboard`; the `glass` surface utility is defined in `layout.css`. **View transitions** (CSS only, `.dashboard-view` in `layout.css`): when the page or website changes (not filters), the `(app)` layout's `{#key}` remounts the view; while the next one loads it gets `data-leaving` (dims), then its sections and the children of any `data-stagger` element rise in. The sidebar highlights (sites and views) move on click via `navigating.to`, while `aria-current` stays on the page actually shown.
 - **Time zones:** timestamps are stored and sent as UTC ISO strings. `+layout.svelte` writes the browser's IANA zone to the `tz` cookie (`src/lib/timezone.ts`) and refreshes once; server loads use it for local-day boundaries (`AT TIME ZONE`) and pass `timeZone` to pages so server and client format dates identically. In SQL, parenthesize `x` in `x AT TIME ZONE tz` when `x` is an expression.
 - **Test email:** the `sendTestEmail` form action on `/` calls `sendTestEmail()` from the email module, throttled to one per 30s per instance.
+- **Deleting leads** (permanent, `src/lib/server/delete-leads.ts`): the `deleteLeads` action on `/` takes repeated `id` fields (row trash button, checkbox selection, "Select all" = the rows shown, max 200 ids); the `deleteRange` action on `/analytics` takes the page's exact `start`/`end` instants (end capped at `loadedAt`, so a range ending today never takes leads that arrived after the page loaded) plus `site` (empty = all). Both are same-origin only and go through `confirm-delete-dialog.svelte`; on success the page calls `showDeleted()` (the centre pop in `deleted-pop.svelte`, mounted once in the `(app)` layout) and `refreshAll()`. Actions are posted to `?/name`, which drops the page's query string, so call `refreshAll()` rather than enhance's `update()` (it would navigate to the action location and lose `?site=`).
 - **Browser info is not stored.** The schema has no browser/user-agent column; the endpoint only forwards the `User-Agent` header to the email.
 - `page_path` is a Postgres generated column (`generatedAlwaysAs` in the schema), so it can't drift from `page_url`.
 - SvelteKit 3: use `refreshAll` (not `invalidateAll`), `goto(url, { reset: false })` (not `noScroll`/`keepFocus`), and `resolve()` from `$app/paths` for internal links (ESLint enforces it; external WordPress links need an eslint-disable block).

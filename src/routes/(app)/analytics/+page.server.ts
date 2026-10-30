@@ -7,9 +7,11 @@ import {
 	type RangeKey
 } from '#lib/date-range.ts';
 import { getRangeAnalytics, localDayBounds } from '#lib/server/analytics.ts';
-import { siteFromUrl } from '#lib/sites.ts';
+import { deleteLeadsInRange, parseRange } from '#lib/server/delete-leads.ts';
+import { isSiteId, siteFromUrl } from '#lib/sites.ts';
 import { resolveTimeZone, TIME_ZONE_COOKIE } from '#lib/timezone.ts';
-import type { PageServerLoad } from './$types';
+import { fail } from '@sveltejs/kit';
+import type { Actions, PageServerLoad } from './$types';
 
 const DAY_MS = 24 * 60 * 60_000;
 
@@ -59,6 +61,7 @@ export const load: PageServerLoad = async ({ url, cookies, setHeaders }) => {
 				to: key === 'custom' ? to! : toLocalIsoDate(now, timeZone)
 			},
 			analytics: await getRangeAnalytics(start, end, timeZone, site),
+			loadedAt: now.toISOString(),
 			notice,
 			error: null
 		};
@@ -74,8 +77,43 @@ export const load: PageServerLoad = async ({ url, cookies, setHeaders }) => {
 				to: to ?? toLocalIsoDate(now, timeZone)
 			},
 			analytics: null,
+			loadedAt: now.toISOString(),
 			notice,
 			error: 'Could not load analytics from the database.'
 		};
+	}
+};
+
+export const actions: Actions = {
+	/**
+	 * Permanently deletes every lead in the range the page showed: the exact [start, end) instants
+	 * from `load`, so a rolling preset deletes what was on screen, not leads that arrived since.
+	 */
+	deleteRange: async ({ request, url }) => {
+		if (request.headers.get('origin') !== url.origin) {
+			return fail(403, { message: 'Leads can only be deleted from this dashboard.' });
+		}
+
+		const form = await request.formData();
+		const range = parseRange(form.get('start'), form.get('end'));
+		if (!range) return fail(400, { message: 'Invalid date range.' });
+		// Empty means all websites; anything else must be a known site id.
+		const siteValue = form.get('site') ?? '';
+		if (siteValue !== '' && !isSiteId(siteValue)) {
+			return fail(400, { message: 'Unknown website.' });
+		}
+
+		try {
+			return {
+				deleted: await deleteLeadsInRange(
+					range.start,
+					range.end,
+					isSiteId(siteValue) ? siteValue : null
+				)
+			};
+		} catch (error) {
+			console.error('Failed to delete leads in range', error);
+			return fail(500, { message: 'Could not delete the leads from the database.' });
+		}
 	}
 };
