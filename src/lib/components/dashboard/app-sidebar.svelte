@@ -19,10 +19,11 @@
 		siteCounts: { site: string | null; total: number; today: number }[] | null;
 	} = $props();
 
-	// Each website row is ITEM_HEIGHT tall with ITEM_GAP between rows; the active highlight is one
-	// element moved with a transform, so switching sites animates on the compositor.
+	// Each website row is ITEM_HEIGHT tall with ITEM_GAP between rows (views: VIEW_HEIGHT, same gap);
+	// each list's highlight is one element moved with a transform, so it animates on the compositor.
 	const ITEM_HEIGHT = 44;
 	const ITEM_GAP = 4;
+	const VIEW_HEIGHT = 40;
 
 	const options = [
 		{ id: null, name: 'All websites', accent: null },
@@ -35,8 +36,13 @@
 	] as const;
 
 	const currentSite = $derived(siteFromUrl(page.url));
-	const activeIndex = $derived(options.findIndex((option) => option.id === currentSite));
 	const pendingSite = $derived(navigating.to ? siteFromUrl(navigating.to.url) : undefined);
+	// The highlights follow a click immediately, while the next view loads; aria-current keeps
+	// describing the page that is actually shown.
+	const selectedSite = $derived(pendingSite === undefined ? currentSite : pendingSite);
+	const selectedPath = $derived((navigating.to?.url ?? page.url).pathname);
+	const activeIndex = $derived(options.findIndex((option) => option.id === selectedSite));
+	const viewIndex = $derived(views.findIndex((view) => view.path === selectedPath));
 
 	function countFor(id: SiteId | null) {
 		if (!siteCounts) return null;
@@ -57,11 +63,13 @@
 		return href(path, new URLSearchParams(currentSite ? { [SITE_URL_PARAM]: currentSite } : {}));
 	}
 
+	// URLs with a query use resolve()'s pathname form (no leading slash). The route-ID form only
+	// drops the `(app)` group when it is a whole segment, so `/(app)?site=x` stayed in the URL (404).
 	function href(path: '/' | '/analytics', params: URLSearchParams) {
 		if (path === '/analytics') {
-			return params.size > 0 ? resolve(`/(app)/analytics?${params}`) : resolve('/(app)/analytics');
+			return params.size > 0 ? resolve(`analytics?${params}`) : resolve('/(app)/analytics');
 		}
-		return params.size > 0 ? resolve(`/(app)?${params}`) : resolve('/(app)');
+		return params.size > 0 ? resolve(`?${params}`) : resolve('/(app)');
 	}
 </script>
 
@@ -97,6 +105,7 @@
 			{/if}
 			{#each options as option (option.id)}
 				{@const active = option.id === currentSite}
+				{@const selected = option.id === selectedSite}
 				{@const count = countFor(option.id)}
 				<li>
 					<a
@@ -104,7 +113,7 @@
 						aria-current={active ? 'page' : undefined}
 						class={cn(
 							'group relative flex items-center gap-3 rounded-xl px-3 text-sm transition-colors duration-200',
-							active
+							selected
 								? 'font-medium text-foreground'
 								: 'text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground'
 						)}
@@ -114,7 +123,7 @@
 							<span
 								class="mx-[5px] size-2.5 shrink-0 rounded-full transition-[box-shadow] duration-300"
 								style:background-color={option.accent}
-								style:box-shadow={active ? `0 0 12px 1px ${option.accent}` : undefined}
+								style:box-shadow={selected ? `0 0 12px 1px ${option.accent}` : undefined}
 							></span>
 						{:else}
 							<span class="flex w-5 shrink-0 justify-center -space-x-1" aria-hidden="true">
@@ -133,7 +142,7 @@
 							<span
 								class={cn(
 									'rounded-md px-1.5 py-0.5 text-xs tabular-nums transition-colors',
-									active ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground'
+									selected ? 'bg-foreground/10 text-foreground' : 'text-muted-foreground'
 								)}
 								title="Leads, all time">{formatNumber(count)}</span
 							>
@@ -151,19 +160,29 @@
 		>
 			Views
 		</p>
-		<ul class="flex flex-col gap-1">
+		<ul class="relative flex flex-col" style:gap="{ITEM_GAP}px">
+			{#if viewIndex >= 0}
+				<li
+					aria-hidden="true"
+					class="pointer-events-none absolute inset-x-0 top-0 rounded-xl bg-foreground/[0.07] shadow-[0_1px_0_0_inset] ring-1 shadow-white/5 ring-foreground/10 transition-transform duration-300 ease-[cubic-bezier(0.2,0.8,0.2,1)] motion-reduce:transition-none"
+					style:height="{VIEW_HEIGHT}px"
+					style:transform="translateY({viewIndex * (VIEW_HEIGHT + ITEM_GAP)}px)"
+				></li>
+			{/if}
 			{#each views as view (view.path)}
 				{@const active = page.url.pathname === view.path}
+				{@const selected = selectedPath === view.path}
 				<li>
 					<a
 						href={viewHref(view.path)}
 						aria-current={active ? 'page' : undefined}
 						class={cn(
-							'flex h-10 items-center gap-3 rounded-xl px-3 text-sm transition-colors duration-200',
-							active
-								? 'bg-foreground/[0.07] font-medium text-foreground'
+							'relative flex items-center gap-3 rounded-xl px-3 text-sm transition-colors duration-200',
+							selected
+								? 'font-medium text-foreground'
 								: 'text-muted-foreground hover:bg-foreground/[0.04] hover:text-foreground'
 						)}
+						style:height="{VIEW_HEIGHT}px"
 					>
 						<view.icon class="size-4" />
 						{view.label}

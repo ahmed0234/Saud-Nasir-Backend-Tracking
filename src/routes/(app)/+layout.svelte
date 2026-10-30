@@ -9,9 +9,6 @@
 	import MenuIcon from '@lucide/svelte/icons/menu';
 	import { afterNavigate } from '$app/navigation';
 	import { navigating, page } from '$app/state';
-	import { cubicOut } from 'svelte/easing';
-	import { prefersReducedMotion } from 'svelte/motion';
-	import { fly } from 'svelte/transition';
 	import type { LayoutProps } from './$types';
 
 	let { data, children }: LayoutProps = $props();
@@ -19,8 +16,15 @@
 	let mobileNavOpen = $state(false);
 
 	const site = $derived(getSite(siteFromUrl(page.url)));
-	// Re-run the entrance animation when the website or the view changes, not on filter changes.
-	const viewKey = $derived(`${page.url.pathname}|${site?.id ?? 'all'}`);
+	// Where a pending navigation is heading; the progress bar takes that site's colour right away.
+	const nextSite = $derived(navigating.to ? getSite(siteFromUrl(navigating.to.url)) : site);
+
+	// A view is one page for one website. Changing it (not a filter) runs the view transition in
+	// layout.css: the current view dims while the next one loads, then the new one staggers in.
+	const viewKeyFor = (url: { pathname: string } & Parameters<typeof siteFromUrl>[0]) =>
+		`${url.pathname}|${getSite(siteFromUrl(url))?.id ?? 'all'}`;
+	const viewKey = $derived(viewKeyFor(page.url));
+	const leaving = $derived(!!navigating.to && viewKeyFor(navigating.to.url) !== viewKey);
 
 	afterNavigate(() => {
 		mobileNavOpen = false;
@@ -36,7 +40,7 @@
 	<!-- Tinted with the selected website's colour; fades between sites. -->
 	<div
 		class="absolute top-[-10rem] right-[-8rem] h-[28rem] w-[28rem] rounded-full opacity-[0.14] blur-3xl transition-[background-color] duration-700 ease-out dark:opacity-[0.16]"
-		style:background-color={site?.accent ?? 'var(--foreground)'}
+		style:background-color={nextSite?.accent ?? 'var(--foreground)'}
 	></div>
 	<div
 		class="absolute right-[-12rem] bottom-[-16rem] h-[30rem] w-[30rem] rounded-full bg-foreground/[0.05] blur-3xl"
@@ -106,18 +110,12 @@
 					>
 						<div
 							class="h-full w-1/3 animate-[nav-progress_1.1s_ease-in-out_infinite] rounded-full motion-reduce:animate-none"
-							style:background-color={site?.accent ?? 'var(--foreground)'}
+							style:background-color={nextSite?.accent ?? 'var(--foreground)'}
 						></div>
 					</div>
 				{/if}
 				{#key viewKey}
-					<div
-						in:fly={{
-							y: 12,
-							duration: prefersReducedMotion.current ? 0 : 320,
-							easing: cubicOut
-						}}
-					>
+					<div class="dashboard-view" data-leaving={leaving || undefined} aria-busy={leaving}>
 						{@render children()}
 					</div>
 				{/key}

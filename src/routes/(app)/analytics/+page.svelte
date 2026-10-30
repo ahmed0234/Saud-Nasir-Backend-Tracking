@@ -133,8 +133,9 @@
 		<div
 			class={cn('space-y-6 transition-opacity duration-300', loading && 'opacity-50')}
 			aria-busy={loading}
+			data-stagger
 		>
-			<div class="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4">
+			<div class="grid grid-cols-2 gap-3 sm:gap-4 xl:grid-cols-4" data-stagger>
 				<StatCard label="Leads" value={formatNumber(summary.total)} icon={MousePointerClickIcon}>
 					{#snippet hint()}
 						{#if delta === null}
@@ -183,7 +184,7 @@
 					/>
 				</div>
 			{:else}
-				<div class="grid gap-6 lg:grid-cols-2">
+				<div class="grid gap-6 lg:grid-cols-2" data-stagger>
 					<section class="rounded-2xl glass p-5" aria-labelledby="timeline-heading">
 						<header class="mb-4 space-y-1">
 							<h2 id="timeline-heading" class="font-medium">Leads over time</h2>
@@ -213,7 +214,7 @@
 					</section>
 				</div>
 
-				<div class="grid gap-6 lg:grid-cols-2">
+				<div class="grid gap-6 lg:grid-cols-2" data-stagger>
 					<RankedList
 						title="Lead types"
 						description="CTA clicks and form submissions by what was clicked"
@@ -264,7 +265,7 @@
 					</RankedList>
 				{/if}
 
-				<div class="grid gap-6 lg:grid-cols-2">
+				<div class="grid gap-6 lg:grid-cols-2" data-stagger>
 					<RankedList
 						title="Top cities"
 						description="Where leads came from, by city and state"

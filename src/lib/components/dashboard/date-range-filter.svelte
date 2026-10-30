@@ -44,7 +44,7 @@
 
 	function navigate(params: Record<string, string>) {
 		const query = new URLSearchParams(site ? { [SITE_URL_PARAM]: site, ...params } : params);
-		goto(resolve(`/(app)/analytics?${query}`), { reset: false });
+		goto(resolve(`analytics?${query}`), { reset: false });
 	}
 
 	function onOpenChange(next: boolean) {

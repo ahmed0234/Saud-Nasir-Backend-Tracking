@@ -44,7 +44,7 @@
 	const recent = $derived(data.dashboard?.recent ?? []);
 	const analyticsHref = $derived(
 		data.site
-			? resolve(`/(app)/analytics?${new URLSearchParams({ [SITE_URL_PARAM]: data.site })}`)
+			? resolve(`analytics?${new URLSearchParams({ [SITE_URL_PARAM]: data.site })}`)
 			: resolve('/(app)/analytics')
 	);
 </script>
@@ -137,6 +137,7 @@
 				'grid grid-cols-2 gap-3 transition-opacity sm:gap-4 xl:grid-cols-4',
 				refreshing && 'opacity-60'
 			)}
+			data-stagger
 		>
 			<StatCard label="Total leads" value={formatNumber(summary.total)} icon={UsersIcon}>
 				{#snippet hint()}All time · {formatNumber(summary.uniquePages)} pages with leads{/snippet}
