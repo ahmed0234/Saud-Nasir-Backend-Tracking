@@ -1,5 +1,6 @@
 <script lang="ts">
 	import ThemeToggle from '#lib/components/theme-toggle.svelte';
+	import { Button } from '#lib/components/ui/button/index.js';
 	import { formatNumber } from '#lib/format.ts';
 	import { SITE_URL_PARAM, SITES, siteFromUrl, type SiteId } from '#lib/sites.ts';
 	import { cn } from '#lib/utils.js';
@@ -7,6 +8,7 @@
 	import ChartLineIcon from '@lucide/svelte/icons/chart-line';
 	import LayoutGridIcon from '@lucide/svelte/icons/layout-grid';
 	import Loader2Icon from '@lucide/svelte/icons/loader-2';
+	import LogOutIcon from '@lucide/svelte/icons/log-out';
 	import { resolve } from '$app/paths';
 	import { navigating, page } from '$app/state';
 
@@ -57,15 +59,15 @@
 
 	function href(path: '/' | '/analytics', params: URLSearchParams) {
 		if (path === '/analytics') {
-			return params.size > 0 ? resolve(`/analytics?${params}`) : resolve('/analytics');
+			return params.size > 0 ? resolve(`/(app)/analytics?${params}`) : resolve('/(app)/analytics');
 		}
-		return params.size > 0 ? resolve(`/?${params}`) : resolve('/');
+		return params.size > 0 ? resolve(`/(app)?${params}`) : resolve('/(app)');
 	}
 </script>
 
 <div class="flex h-full flex-col gap-7 p-3">
 	<a
-		href={resolve('/')}
+		href={resolve('/(app)')}
 		class="flex items-center gap-2.5 rounded-xl px-2 pt-1 font-semibold tracking-tight"
 	>
 		<span class="grid size-8 place-items-center rounded-lg bg-foreground text-background shadow-sm">
@@ -173,6 +175,14 @@
 
 	<div class="mt-auto flex items-center justify-between gap-2 px-1">
 		<p class="text-xs text-muted-foreground">Read-only analytics</p>
-		<ThemeToggle />
+		<div class="flex items-center gap-2">
+			<ThemeToggle />
+			<!-- A plain form POST: the full page load on sign-out also drops all client-side data. -->
+			<form method="POST" action={resolve('/logout')}>
+				<Button type="submit" variant="outline" size="icon" aria-label="Sign out" title="Sign out">
+					<LogOutIcon />
+				</Button>
+			</form>
+		</div>
 	</div>
 </div>

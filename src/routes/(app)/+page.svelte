@@ -44,8 +44,8 @@
 	const recent = $derived(data.dashboard?.recent ?? []);
 	const analyticsHref = $derived(
 		data.site
-			? resolve(`/analytics?${new URLSearchParams({ [SITE_URL_PARAM]: data.site })}`)
-			: resolve('/analytics')
+			? resolve(`/(app)/analytics?${new URLSearchParams({ [SITE_URL_PARAM]: data.site })}`)
+			: resolve('/(app)/analytics')
 	);
 </script>
 

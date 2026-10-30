@@ -5,8 +5,8 @@ import { resolveTimeZone, TIME_ZONE_COOKIE } from '#lib/timezone.ts';
 import { fail } from '@sveltejs/kit';
 import type { Actions, PageServerLoad } from './$types';
 
-// The dashboard has no auth, so throttle test emails to protect the Gmail quota. Per function
-// instance (best-effort), which is enough to stop accidental or scripted repeats.
+// Throttle test emails to protect the Gmail quota, even for signed-in users. Per function
+// instance (best-effort), which is enough to stop accidental repeats.
 const TEST_EMAIL_COOLDOWN_MS = 30_000;
 let lastTestEmailAt = 0;
 

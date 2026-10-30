@@ -31,7 +31,7 @@
 	let { data }: PageProps = $props();
 
 	let refreshing = $state(false);
-	const loading = $derived(refreshing || navigating.to?.route.id === '/analytics');
+	const loading = $derived(refreshing || navigating.to?.route.id === '/(app)/analytics');
 
 	const site = $derived(getSite(data.site));
 	const analytics = $derived(data.analytics);
