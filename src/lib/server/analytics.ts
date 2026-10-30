@@ -1,5 +1,5 @@
 import { count, countDistinct, desc, eq, gte, lt, and, sql, type SQL } from 'drizzle-orm';
-import type { SiteId } from '#lib/sites.ts';
+import type { Campaign, SiteId } from '#lib/sites.ts';
 import { db } from './db/index.ts';
 import { ctaClicks } from './db/schema.ts';
 
@@ -16,7 +16,7 @@ export type DashboardSummary = {
 	formSubmissions: number;
 };
 
-export type RecentClick = {
+export type RecentClick = Campaign & {
 	id: string;
 	site: string | null;
 	eventType: string;
@@ -28,6 +28,13 @@ export type RecentClick = {
 	city: string | null;
 	state: string | null;
 	clickedAt: string;
+	ctaPlacement: string | null;
+	sourceCtaType: string | null;
+	sourceCtaText: string | null;
+	sourceCtaPlacement: string | null;
+	sourceCtaPageUrl: string | null;
+	sourceCtaClickedAt: string | null;
+	isHeaderCta: boolean;
 };
 
 export type Bucket = { start: string; clicks: number };
@@ -52,6 +59,10 @@ export type RangeAnalytics = {
 	types: { eventType: string; buttonType: string | null; clicks: number }[];
 	buttons: { eventType: string; label: string; clicks: number }[];
 	sites: { site: string | null; clicks: number }[];
+	/** Leads by CTA location ('header' | 'footer' | 'page'), or null when no CTA was recorded. */
+	origins: { placement: string | null; clicks: number }[];
+	/** Leads by UTM source / medium, or by ad network when only a click ID was present. */
+	campaigns: Breakdown[];
 };
 
 export type SiteCounts = { site: string | null; total: number; today: number }[];
@@ -66,6 +77,21 @@ const forSite = (site: SiteId | null) => (site ? eq(ctaClicks.site, site) : unde
 
 const countWhere = (condition: SQL) => sql<number>`(count(*) filter (where ${condition}))::int`;
 const isFormSubmit = sql`${ctaClicks.eventType} = 'form_submit'`;
+
+// Where a lead came from: its own CTA's location, or for a form the location of the CTA it is
+// credited to (same rule as the is_header_cta column).
+const leadPlacement = sql<
+	string | null
+>`case when ${isFormSubmit} then ${ctaClicks.sourceCtaPlacement} else ${ctaClicks.ctaPlacement} end`;
+// "source / medium" when UTMs were present, else the ad network implied by a click ID.
+const campaignLabel = sql<string>`coalesce(
+	nullif(concat_ws(' / ', ${ctaClicks.utmSource}, ${ctaClicks.utmMedium}), ''),
+	case
+		when coalesce(${ctaClicks.gclid}, ${ctaClicks.gbraid}, ${ctaClicks.wbraid}) is not null then 'Google Ads (auto-tagged)'
+		when ${ctaClicks.fbclid} is not null then 'Meta Ads'
+		else 'No campaign (direct, organic or referral)'
+	end
+)`;
 
 /** All-time and today's lead counts per site, for the sidebar. */
 export async function getSiteCounts(timeZone: string): Promise<SiteCounts> {
@@ -104,7 +130,11 @@ export async function getDashboard(timeZone: string, site: SiteId | null) {
 		loadedAt: new Date().toISOString(),
 		limit: RECENT_LIMIT,
 		summary: summaryRows[0] satisfies DashboardSummary,
-		recent: recent.map((row): RecentClick => ({ ...row, clickedAt: row.clickedAt.toISOString() }))
+		recent: recent.map((row): RecentClick => ({
+			...row,
+			clickedAt: row.clickedAt.toISOString(),
+			sourceCtaClickedAt: row.sourceCtaClickedAt?.toISOString() ?? null
+		}))
 	};
 }
 
@@ -119,80 +149,101 @@ export async function getRangeAnalytics(
 	// Hourly detail for short ranges, daily otherwise.
 	const unit = end.getTime() - start.getTime() <= 3 * 24 * 60 * 60_000 ? 'hour' : 'day';
 
-	const [summaryRows, previousRows, timeline, daily, cities, states, pages, types, buttons, sites] =
-		await Promise.all([
-			db
-				.select({
-					total: count(),
-					uniquePages: countDistinct(ctaClicks.pageUrl),
-					uniqueLocations: sql<number>`(count(distinct (${ctaClicks.city}, ${ctaClicks.state})) filter (where ${ctaClicks.city} is not null or ${ctaClicks.state} is not null))::int`,
-					located: sql<number>`(count(*) filter (where ${ctaClicks.city} is not null or ${ctaClicks.state} is not null))::int`,
-					ctaClicks: countWhere(sql`not (${isFormSubmit})`),
-					formSubmissions: countWhere(isFormSubmit)
-				})
-				.from(ctaClicks)
-				.where(inRange),
-			db
-				.select({ total: count() })
-				.from(ctaClicks)
-				.where(
-					and(
-						gte(ctaClicks.clickedAt, previousStart),
-						lt(ctaClicks.clickedAt, start),
-						forSite(site)
-					)
-				),
-			buckets(start, end, timeZone, unit, site),
-			buckets(start, end, timeZone, 'day', site),
-			db
-				.select({
-					city: ctaClicks.city,
-					state: ctaClicks.state,
-					clicks: count()
-				})
-				.from(ctaClicks)
-				.where(inRange)
-				.groupBy(ctaClicks.city, ctaClicks.state)
-				.orderBy(desc(count()))
-				.limit(BREAKDOWN_LIMIT),
-			db
-				.select({ state: ctaClicks.state, clicks: count() })
-				.from(ctaClicks)
-				.where(inRange)
-				.groupBy(ctaClicks.state)
-				.orderBy(desc(count()))
-				.limit(BREAKDOWN_LIMIT),
-			db
-				.select({ pageUrl: ctaClicks.pageUrl, clicks: count() })
-				.from(ctaClicks)
-				.where(inRange)
-				.groupBy(ctaClicks.pageUrl)
-				.orderBy(desc(count()))
-				.limit(BREAKDOWN_LIMIT),
-			db
-				.select({
-					eventType: ctaClicks.eventType,
-					buttonType: ctaClicks.buttonType,
-					clicks: count()
-				})
-				.from(ctaClicks)
-				.where(inRange)
-				.groupBy(ctaClicks.eventType, ctaClicks.buttonType)
-				.orderBy(desc(count())),
-			db
-				.select({ eventType: ctaClicks.eventType, label: ctaClicks.buttonText, clicks: count() })
-				.from(ctaClicks)
-				.where(and(inRange, sql`${ctaClicks.buttonText} is not null`))
-				.groupBy(ctaClicks.eventType, ctaClicks.buttonText)
-				.orderBy(desc(count()))
-				.limit(BREAKDOWN_LIMIT),
-			db
-				.select({ site: ctaClicks.site, clicks: count() })
-				.from(ctaClicks)
-				.where(inRange)
-				.groupBy(ctaClicks.site)
-				.orderBy(desc(count()))
-		]);
+	const [
+		summaryRows,
+		previousRows,
+		timeline,
+		daily,
+		cities,
+		states,
+		pages,
+		types,
+		buttons,
+		sites,
+		origins,
+		campaigns
+	] = await Promise.all([
+		db
+			.select({
+				total: count(),
+				uniquePages: countDistinct(ctaClicks.pageUrl),
+				uniqueLocations: sql<number>`(count(distinct (${ctaClicks.city}, ${ctaClicks.state})) filter (where ${ctaClicks.city} is not null or ${ctaClicks.state} is not null))::int`,
+				located: sql<number>`(count(*) filter (where ${ctaClicks.city} is not null or ${ctaClicks.state} is not null))::int`,
+				ctaClicks: countWhere(sql`not (${isFormSubmit})`),
+				formSubmissions: countWhere(isFormSubmit)
+			})
+			.from(ctaClicks)
+			.where(inRange),
+		db
+			.select({ total: count() })
+			.from(ctaClicks)
+			.where(
+				and(gte(ctaClicks.clickedAt, previousStart), lt(ctaClicks.clickedAt, start), forSite(site))
+			),
+		buckets(start, end, timeZone, unit, site),
+		buckets(start, end, timeZone, 'day', site),
+		db
+			.select({
+				city: ctaClicks.city,
+				state: ctaClicks.state,
+				clicks: count()
+			})
+			.from(ctaClicks)
+			.where(inRange)
+			.groupBy(ctaClicks.city, ctaClicks.state)
+			.orderBy(desc(count()))
+			.limit(BREAKDOWN_LIMIT),
+		db
+			.select({ state: ctaClicks.state, clicks: count() })
+			.from(ctaClicks)
+			.where(inRange)
+			.groupBy(ctaClicks.state)
+			.orderBy(desc(count()))
+			.limit(BREAKDOWN_LIMIT),
+		db
+			.select({ pageUrl: ctaClicks.pageUrl, clicks: count() })
+			.from(ctaClicks)
+			.where(inRange)
+			.groupBy(ctaClicks.pageUrl)
+			.orderBy(desc(count()))
+			.limit(BREAKDOWN_LIMIT),
+		db
+			.select({
+				eventType: ctaClicks.eventType,
+				buttonType: ctaClicks.buttonType,
+				clicks: count()
+			})
+			.from(ctaClicks)
+			.where(inRange)
+			.groupBy(ctaClicks.eventType, ctaClicks.buttonType)
+			.orderBy(desc(count())),
+		db
+			.select({ eventType: ctaClicks.eventType, label: ctaClicks.buttonText, clicks: count() })
+			.from(ctaClicks)
+			.where(and(inRange, sql`${ctaClicks.buttonText} is not null`))
+			.groupBy(ctaClicks.eventType, ctaClicks.buttonText)
+			.orderBy(desc(count()))
+			.limit(BREAKDOWN_LIMIT),
+		db
+			.select({ site: ctaClicks.site, clicks: count() })
+			.from(ctaClicks)
+			.where(inRange)
+			.groupBy(ctaClicks.site)
+			.orderBy(desc(count())),
+		db
+			.select({ placement: leadPlacement, clicks: count() })
+			.from(ctaClicks)
+			.where(inRange)
+			.groupBy(leadPlacement)
+			.orderBy(desc(count())),
+		db
+			.select({ label: campaignLabel, clicks: count() })
+			.from(ctaClicks)
+			.where(inRange)
+			.groupBy(campaignLabel)
+			.orderBy(desc(count()))
+			.limit(BREAKDOWN_LIMIT)
+	]);
 
 	const summary = summaryRows[0];
 
@@ -221,7 +272,9 @@ export async function getRangeAnalytics(
 		pages: pages.map((row) => ({ label: row.pageUrl, detail: null, clicks: row.clicks })),
 		types,
 		buttons: buttons.map((row) => ({ ...row, label: row.label ?? '' })),
-		sites
+		sites,
+		origins,
+		campaigns: campaigns.map((row) => ({ label: row.label, detail: null, clicks: row.clicks }))
 	};
 }
 

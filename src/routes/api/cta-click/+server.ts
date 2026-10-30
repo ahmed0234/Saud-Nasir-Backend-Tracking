@@ -3,20 +3,39 @@ import { ctaClicks } from '#lib/server/db/schema.ts';
 import { sendCtaClickNotification } from '#lib/server/email/index.ts';
 import { geoFromHeaders } from '#lib/server/geo.ts';
 import { createRateLimiter } from '#lib/server/rate-limit.ts';
-import { isEventType, isSiteId, siteForHost, type EventType, type SiteId } from '#lib/sites.ts';
+import {
+	CAMPAIGN_FIELDS,
+	isCtaPlacement,
+	isEventType,
+	isSiteId,
+	siteForHost,
+	type Campaign,
+	type CampaignKey,
+	type CtaPlacement,
+	type EventType,
+	type SiteId
+} from '#lib/sites.ts';
 import { CORS_ALLOWED_ORIGINS } from '$app/env/private';
 import { waitUntil } from '@vercel/functions';
 import type { RequestHandler } from './$types';
 
-const MAX_BODY_BYTES = 4096;
+// Two page URLs (the lead's and its source CTA's) plus campaign parameters fit comfortably.
+const MAX_BODY_BYTES = 8192;
 const MAX_URL_LENGTH = 2048;
 const MAX_PLACE_LENGTH = 120;
 const MAX_LABEL_LENGTH = 120;
+const MAX_CAMPAIGN_LENGTH = 255;
 const BUTTON_TYPE_PATTERN = /^[a-z0-9_-]{1,40}$/;
+// Ad click IDs are URL-safe tokens; anything else is not a real click ID.
+const CLICK_ID_PATTERN = /^[\w.~-]{1,255}$/;
+const CLICK_ID_KEYS = new Set<CampaignKey>(['gclid', 'gbraid', 'wbraid', 'fbclid']);
 // Accept client timestamps only within this window around server time; outside it (bad device
 // clock, replayed request) the server's own time is used instead.
 const MAX_CLOCK_SKEW_PAST_MS = 24 * 60 * 60_000;
 const MAX_CLOCK_SKEW_FUTURE_MS = 5 * 60_000;
+// The snippets credit a CTA clicked up to 30 minutes before a form submission; a little slack
+// covers clock differences and slow form plugins.
+const MAX_SOURCE_AGE_MS = 35 * 60_000;
 
 // Each accepted click writes a row and sends an email, so cap clicks per visitor IP. A real
 // visitor never clicks 30 CTAs a minute; a script hammering the endpoint does.
@@ -32,6 +51,29 @@ type ClickPayload = {
 	city?: unknown;
 	state?: unknown;
 	clickedAt?: unknown;
+	/** CTA clicks: 'header' | 'footer' | 'page'. */
+	placement?: unknown;
+	/** Form submissions: the CTA clicked shortly before, as { type, text, placement, pageUrl, clickedAt }. */
+	source?: unknown;
+	/** Campaign parameters from the landing page: { utmSource, ..., gclid, gbraid, wbraid, fbclid }. */
+	attribution?: unknown;
+};
+
+type SourceCta = Pick<
+	typeof ctaClicks.$inferInsert,
+	| 'sourceCtaType'
+	| 'sourceCtaText'
+	| 'sourceCtaPlacement'
+	| 'sourceCtaPageUrl'
+	| 'sourceCtaClickedAt'
+>;
+
+const NO_SOURCE: SourceCta = {
+	sourceCtaType: null,
+	sourceCtaText: null,
+	sourceCtaPlacement: null,
+	sourceCtaPageUrl: null,
+	sourceCtaClickedAt: null
 };
 
 class ValidationError extends Error {}
@@ -137,6 +179,67 @@ function parseClickedAt(value: unknown, now: Date): Date {
 	return skew < -MAX_CLOCK_SKEW_PAST_MS || skew > MAX_CLOCK_SKEW_FUTURE_MS ? now : date;
 }
 
+// Attribution is best effort: a malformed or missing value is dropped (stored as null) instead of
+// rejecting the lead, so a lead is never lost because of its attribution.
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
+		? (value as Record<string, unknown>)
+		: null;
+}
+
+function optionalText(value: unknown, maxLength: number): string | null {
+	if (typeof value !== 'string') return null;
+	return value.replace(/\s+/g, ' ').trim().slice(0, maxLength) || null;
+}
+
+function parsePlacement(value: unknown): CtaPlacement | null {
+	return isCtaPlacement(value) ? value : null;
+}
+
+/** The CTA a form submission is credited to, if it was clicked on this site in the last 30 minutes. */
+function parseSource(value: unknown, now: Date): SourceCta {
+	const source = asRecord(value);
+	if (!source) return NO_SOURCE;
+
+	const clickedAt =
+		typeof source.clickedAt === 'string' || typeof source.clickedAt === 'number'
+			? new Date(source.clickedAt)
+			: null;
+	const age = clickedAt ? now.getTime() - clickedAt.getTime() : Number.NaN;
+	if (!(age >= -MAX_CLOCK_SKEW_FUTURE_MS && age <= MAX_SOURCE_AGE_MS)) return NO_SOURCE;
+
+	let pageUrl: string | null = null;
+	try {
+		pageUrl = parsePageUrl(source.pageUrl).href;
+	} catch {
+		// Keep the rest of the source without a page.
+	}
+	const type = typeof source.type === 'string' ? source.type.trim().toLowerCase() : '';
+	const parsed: SourceCta = {
+		sourceCtaType: BUTTON_TYPE_PATTERN.test(type) ? type : null,
+		sourceCtaText: optionalText(source.text, MAX_LABEL_LENGTH),
+		sourceCtaPlacement: parsePlacement(source.placement),
+		sourceCtaPageUrl: pageUrl,
+		sourceCtaClickedAt: clickedAt
+	};
+	// Nothing that says which CTA it was: not a usable source.
+	if (!parsed.sourceCtaType && !parsed.sourceCtaText && !parsed.sourceCtaPlacement) {
+		return NO_SOURCE;
+	}
+	return parsed;
+}
+
+function parseAttribution(value: unknown): Campaign {
+	const attribution = asRecord(value) ?? {};
+	const campaign = {} as Campaign;
+	for (const { key } of CAMPAIGN_FIELDS) {
+		const text = optionalText(attribution[key], MAX_CAMPAIGN_LENGTH);
+		campaign[key] = text && CLICK_ID_KEYS.has(key) && !CLICK_ID_PATTERN.test(text) ? null : text;
+	}
+	return campaign;
+}
+
 export const OPTIONS: RequestHandler = ({ request }) => {
 	const origin = request.headers.get('origin');
 	return new Response(null, {
@@ -181,9 +284,11 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 	let values: typeof ctaClicks.$inferInsert;
 	try {
 		const pageUrl = parsePageUrl(payload.pageUrl);
+		const eventType = parseEventType(payload.eventType);
+		const now = new Date();
 		values = {
 			site: resolveSite(payload.site, pageUrl),
-			eventType: parseEventType(payload.eventType),
+			eventType,
 			buttonType: parseButtonType(payload.buttonType),
 			buttonText: parseLabel(payload.buttonText, 'buttonText'),
 			formName: parseLabel(payload.formName, 'formName'),
@@ -191,7 +296,11 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 			// Prefer what the site sent; fall back to the edge's IP-based location.
 			city: parsePlace(payload.city, 'city') ?? geo.city,
 			state: parsePlace(payload.state, 'state') ?? geo.state,
-			clickedAt: parseClickedAt(payload.clickedAt, new Date())
+			clickedAt: parseClickedAt(payload.clickedAt, now),
+			// A CTA click has its own placement; a form submission is credited to an earlier CTA.
+			ctaPlacement: eventType === 'cta_click' ? parsePlacement(payload.placement) : null,
+			...(eventType === 'form_submit' ? parseSource(payload.source, now) : NO_SOURCE),
+			...parseAttribution(payload.attribution)
 		};
 	} catch (error) {
 		if (error instanceof ValidationError) return json({ error: error.message }, 400, headers);

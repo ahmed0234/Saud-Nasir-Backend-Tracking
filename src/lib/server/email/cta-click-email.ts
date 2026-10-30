@@ -1,4 +1,17 @@
-import { buttonTypeLabel, EVENT_TYPE_LABELS, getSite, isEventType } from '#lib/sites.ts';
+import {
+	adNetworks,
+	campaignDetails,
+	campaignSummary,
+	leadOrigin,
+	sourceCtaSummary
+} from '#lib/lead-attribution.ts';
+import {
+	buttonTypeLabel,
+	EVENT_TYPE_LABELS,
+	getSite,
+	isEventType,
+	type CampaignKey
+} from '#lib/sites.ts';
 import type { CtaClick } from '../db/schema.ts';
 
 export type CtaClickEmailDetails = Pick<
@@ -13,6 +26,11 @@ export type CtaClickEmailDetails = Pick<
 	| 'city'
 	| 'state'
 	| 'clickedAt'
+	| 'ctaPlacement'
+	| 'sourceCtaType'
+	| 'sourceCtaText'
+	| 'sourceCtaPlacement'
+	| CampaignKey
 > & {
 	country: string | null;
 	userAgent: string | null;
@@ -62,6 +80,15 @@ export function renderCtaClickEmail(click: CtaClickEmailDetails, { test = false 
 		{ label: 'Lead type', value: leadType },
 		{ label: isForm ? 'Submit button' : 'Button', value: button || NOT_AVAILABLE },
 		...(isForm ? [{ label: 'Form', value: click.formName ?? NOT_AVAILABLE }] : []),
+		{ label: 'Lead origin', value: leadOrigin(click) ?? NOT_AVAILABLE },
+		...(isForm ? [{ label: 'Source CTA', value: sourceCtaSummary(click) ?? 'None recorded' }] : []),
+		{
+			label: 'Campaign',
+			value:
+				[campaignSummary(click), adNetworks(click).join(', ')].filter(Boolean).join(' · ') ||
+				'None recorded'
+		},
+		...campaignDetails(click).map((detail) => ({ ...detail, mono: true })),
 		{ label: 'Page path', value: path },
 		{ label: 'City', value: click.city ?? NOT_AVAILABLE },
 		{ label: 'State / region', value: click.state ?? NOT_AVAILABLE },

@@ -4,6 +4,9 @@
 	import ConfirmDeleteDialog from '#lib/components/dashboard/confirm-delete-dialog.svelte';
 	import DateRangeFilter from '#lib/components/dashboard/date-range-filter.svelte';
 	import { showDeleted } from '#lib/components/dashboard/deleted-pop.svelte';
+	import ExportCsvButton from '#lib/components/dashboard/export-csv-button.svelte';
+	import HeaderCtaBadge from '#lib/components/dashboard/header-cta-badge.svelte';
+	import { placementLabel } from '#lib/lead-attribution.ts';
 	import PageHeader from '#lib/components/dashboard/page-header.svelte';
 	import RankedList from '#lib/components/dashboard/ranked-list.svelte';
 	import SiteBadge from '#lib/components/dashboard/site-badge.svelte';
@@ -57,17 +60,17 @@
 		return (summary.total - summary.previousTotal) / summary.previousTotal;
 	});
 
-	// Deleting the selected range removes exactly the leads counted on screen: the range's start,
+	// Deleting or exporting the range covers exactly the leads counted on screen: the range's start,
 	// up to its end or the moment the page loaded, whichever is earlier (a range ending today
 	// mustn't take leads that arrived after the numbers were shown).
 	let deleteOpen = $state(false);
-	const deleteEnd = $derived(
+	const shownEnd = $derived(
 		data.range.end && Date.parse(data.range.end) > Date.parse(data.loadedAt)
 			? data.loadedAt
 			: data.range.end
 	);
 	const deleteDescription = $derived.by(() => {
-		if (!summary || !data.range.start || !deleteEnd) return '';
+		if (!summary || !data.range.start || !shownEnd) return '';
 		const leads = summary.total === 1 ? 'The 1 lead' : `All ${formatNumber(summary.total)} leads`;
 		const source = site ? `from ${site.name}` : 'from all websites';
 		let period: string;
@@ -147,6 +150,14 @@
 			>
 				<RefreshCwIcon class={cn(refreshing && 'animate-spin')} />
 			</Button>
+			{#if data.range.start && shownEnd}
+				<ExportCsvButton
+					start={data.range.start}
+					end={shownEnd}
+					site={data.site}
+					disabled={loading || !summary || summary.total === 0}
+				/>
+			{/if}
 		{/snippet}
 	</PageHeader>
 
@@ -311,6 +322,40 @@
 					</RankedList>
 				</div>
 
+				<div class="grid gap-6 lg:grid-cols-2" data-stagger>
+					<RankedList
+						title="Lead origin"
+						description="Where on the website the CTA behind each lead was"
+						items={analytics.origins.map((row) => ({ ...row, key: row.placement ?? 'none' }))}
+						total={summary.total}
+					>
+						{#snippet label(item)}
+							{#if item.placement === 'header'}
+								<HeaderCtaBadge class="text-xs" />
+							{:else}
+								<span class="font-medium">
+									{placementLabel(item.placement) ?? 'No CTA recorded'}
+								</span>
+								{#if !item.placement}
+									<span class="text-muted-foreground">
+										· forms filled in directly, older leads</span
+									>
+								{/if}
+							{/if}
+						{/snippet}
+					</RankedList>
+					<RankedList
+						title="Campaigns"
+						description="UTM source / medium, or the ad network for auto-tagged ad clicks"
+						items={analytics.campaigns.map((row) => ({ ...row, key: row.label }))}
+						total={summary.total}
+					>
+						{#snippet label(item)}
+							<span class="font-medium">{item.label}</span>
+						{/snippet}
+					</RankedList>
+				</div>
+
 				{#if !site}
 					<RankedList
 						title="Leads by website"
@@ -389,7 +434,7 @@
 	action="?/deleteRange"
 	fields={[
 		['start', data.range.start ?? ''],
-		['end', deleteEnd ?? ''],
+		['end', shownEnd ?? ''],
 		['site', data.site ?? '']
 	]}
 	onresult={onDeleteResult}

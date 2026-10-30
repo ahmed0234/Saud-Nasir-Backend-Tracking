@@ -115,7 +115,20 @@ export async function sendTestEmail(): Promise<DeliveryResult> {
 			state: 'TX',
 			clickedAt: new Date(),
 			country: 'US',
-			userAgent: 'Sample user agent (test email)'
+			userAgent: 'Sample user agent (test email)',
+			ctaPlacement: 'header',
+			sourceCtaType: null,
+			sourceCtaText: null,
+			sourceCtaPlacement: null,
+			utmSource: 'google',
+			utmMedium: 'cpc',
+			utmCampaign: 'sample-campaign',
+			utmTerm: null,
+			utmContent: null,
+			gclid: 'sample-gclid',
+			gbraid: null,
+			wbraid: null,
+			fbclid: null
 		},
 		'test email',
 		{ test: true }

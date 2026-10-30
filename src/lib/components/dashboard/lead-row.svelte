@@ -2,15 +2,25 @@
 	import { Badge } from '#lib/components/ui/badge/index.js';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { Checkbox } from '#lib/components/ui/checkbox/index.js';
+	import HeaderCtaBadge from '#lib/components/dashboard/header-cta-badge.svelte';
 	import { formatDateTime, formatUtc, splitUrl } from '#lib/format.ts';
+	import {
+		adNetworks,
+		campaignDetails,
+		campaignSummary,
+		leadOrigin,
+		sourceCtaSummary
+	} from '#lib/lead-attribution.ts';
 	import type { RecentClick } from '#lib/server/analytics.ts';
 	import { buttonTypeLabel, EVENT_TYPE_LABELS, getSite, isEventType } from '#lib/sites.ts';
 	import { cn } from '#lib/utils.js';
 	import ArrowUpRightIcon from '@lucide/svelte/icons/arrow-up-right';
 	import CalendarCheckIcon from '@lucide/svelte/icons/calendar-check';
 	import ClipboardListIcon from '@lucide/svelte/icons/clipboard-list';
+	import CornerDownRightIcon from '@lucide/svelte/icons/corner-down-right';
 	import MailIcon from '@lucide/svelte/icons/mail';
 	import MapPinIcon from '@lucide/svelte/icons/map-pin';
+	import MegaphoneIcon from '@lucide/svelte/icons/megaphone';
 	import MessageSquareIcon from '@lucide/svelte/icons/message-square';
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
 	import PhoneIcon from '@lucide/svelte/icons/phone';
@@ -53,6 +63,11 @@
 	const buttonLabel = $derived(buttonTypeLabel(lead.buttonType));
 	const title = $derived(lead.buttonText ?? (isForm ? lead.formName : null) ?? buttonLabel ?? kind);
 	const location = $derived([lead.city, lead.state].filter(Boolean).join(', '));
+	// Attribution: where the lead's CTA was, which CTA a form is credited to, and its campaign.
+	const origin = $derived(leadOrigin(lead));
+	const source = $derived(sourceCtaSummary(lead));
+	const campaign = $derived(campaignSummary(lead));
+	const networks = $derived(adNetworks(lead));
 </script>
 
 <div
@@ -93,6 +108,7 @@
 					variant={isForm ? 'default' : 'outline'}
 					class="hidden shrink-0 text-[11px] sm:inline-flex">{kind}</Badge
 				>
+				{#if lead.isHeaderCta}<HeaderCtaBadge />{/if}
 			</div>
 			<p class="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
 				{#if showSite}
@@ -107,7 +123,42 @@
 				{#if isForm && lead.formName && lead.formName !== title}
 					<span aria-hidden="true">·</span><span class="truncate">{lead.formName}</span>
 				{/if}
+				{#if !isForm && origin && !lead.isHeaderCta}
+					<span aria-hidden="true">·</span><span class="shrink-0">{origin}</span>
+				{/if}
 			</p>
+			{#if source || campaign || networks.length > 0}
+				<p
+					class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+				>
+					{#if source}
+						<span
+							class="inline-flex min-w-0 items-center gap-1"
+							title={lead.sourceCtaPageUrl ? `Clicked on ${lead.sourceCtaPageUrl}` : undefined}
+						>
+							<CornerDownRightIcon class="size-3 shrink-0" />
+							<span class="truncate">via {source}</span>
+						</span>
+					{/if}
+					{#if campaign || networks.length > 0}
+						<span
+							class="inline-flex min-w-0 items-center gap-1"
+							title={campaignDetails(lead)
+								.map((detail) => `${detail.label}: ${detail.value}`)
+								.join('\n')}
+						>
+							<MegaphoneIcon class="size-3 shrink-0" />
+							{#if campaign}<span class="truncate">{campaign}</span>{/if}
+							{#each networks as network (network)}
+								<span
+									class="shrink-0 rounded bg-foreground/[0.06] px-1.5 py-px text-[10px] font-medium text-foreground/80 ring-1 ring-foreground/10"
+									>{network}</span
+								>
+							{/each}
+						</span>
+					{/if}
+				</p>
+			{/if}
 		</div>
 
 		<div class="col-span-2 min-w-0 md:col-span-1">

@@ -59,6 +59,36 @@ export function isEventType(value: unknown): value is EventType {
 	return typeof value === 'string' && (EVENT_TYPES as readonly string[]).includes(value);
 }
 
+// Where on the page a CTA was clicked. 'header' includes mobile slide-out menus.
+export const CTA_PLACEMENTS = ['header', 'footer', 'page'] as const;
+export type CtaPlacement = (typeof CTA_PLACEMENTS)[number];
+
+export const CTA_PLACEMENT_LABELS: Record<CtaPlacement, string> = {
+	header: 'Header CTA',
+	footer: 'Footer CTA',
+	page: 'Page CTA'
+};
+
+export function isCtaPlacement(value: unknown): value is CtaPlacement {
+	return typeof value === 'string' && (CTA_PLACEMENTS as readonly string[]).includes(value);
+}
+
+// Campaign parameters the snippets capture from the landing page URL, keyed by the payload field
+// (and schema column) name, with the URL parameter and a client-facing label.
+export const CAMPAIGN_FIELDS = [
+	{ key: 'utmSource', param: 'utm_source', label: 'UTM Source' },
+	{ key: 'utmMedium', param: 'utm_medium', label: 'UTM Medium' },
+	{ key: 'utmCampaign', param: 'utm_campaign', label: 'UTM Campaign' },
+	{ key: 'utmTerm', param: 'utm_term', label: 'UTM Term' },
+	{ key: 'utmContent', param: 'utm_content', label: 'UTM Content' },
+	{ key: 'gclid', param: 'gclid', label: 'Google Click ID (GCLID)' },
+	{ key: 'gbraid', param: 'gbraid', label: 'Google GBRAID' },
+	{ key: 'wbraid', param: 'wbraid', label: 'Google WBRAID' },
+	{ key: 'fbclid', param: 'fbclid', label: 'Meta Click ID (FBCLID)' }
+] as const;
+export type CampaignKey = (typeof CAMPAIGN_FIELDS)[number]['key'];
+export type Campaign = Record<CampaignKey, string | null>;
+
 const BUTTON_TYPE_LABELS: Record<string, string> = {
 	call: 'Call',
 	sms: 'Text',
