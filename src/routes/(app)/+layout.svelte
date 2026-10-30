@@ -1,5 +1,6 @@
 <script lang="ts">
 	import AppSidebar from '#lib/components/dashboard/app-sidebar.svelte';
+	import OpeningIntro from '#lib/components/dashboard/opening-intro.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import * as Sheet from '#lib/components/ui/sheet/index.js';
 	import * as Tooltip from '#lib/components/ui/tooltip/index.js';
@@ -26,6 +27,8 @@
 	});
 </script>
 
+<OpeningIntro />
+
 <div aria-hidden="true" class="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
 	<div
 		class="absolute -top-40 left-1/2 h-[36rem] w-[60rem] -translate-x-1/2 rounded-full bg-foreground/[0.06] blur-3xl"
@@ -44,10 +47,7 @@
 </div>
 
 <Tooltip.Provider delayDuration={150}>
-	<!-- Fades in over the plain background the sign-in animation ends on (and on a fresh load). -->
-	<div
-		class="mx-auto flex min-h-svh max-w-[1600px] animate-in gap-4 p-3 duration-500 fade-in-0 motion-reduce:animate-none sm:p-4"
-	>
+	<div class="mx-auto flex min-h-svh max-w-[1600px] gap-4 p-3 sm:p-4">
 		<!-- Desktop sidebar -->
 		<aside
 			class="sticky top-4 hidden h-[calc(100svh-2rem)] w-64 shrink-0 overflow-y-auto rounded-3xl glass lg:block"
