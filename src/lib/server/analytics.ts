@@ -35,7 +35,14 @@ export type RecentClick = Campaign & {
 	sourceCtaPageUrl: string | null;
 	sourceCtaClickedAt: string | null;
 	isHeaderCta: boolean;
+	referrer: string | null;
+	landingPageUrl: string | null;
+	trafficSource: string | null;
+	trafficChannel: string | null;
 };
+
+/** Leads per traffic source; source and channel are null for leads recorded without one. */
+export type SourceBreakdown = { source: string | null; channel: string | null; clicks: number }[];
 
 export type Bucket = { start: string; clicks: number };
 export type Breakdown = { label: string; detail: string | null; clicks: number };
@@ -63,6 +70,8 @@ export type RangeAnalytics = {
 	origins: { placement: string | null; clicks: number }[];
 	/** Leads by UTM source / medium, or by ad network when only a click ID was present. */
 	campaigns: Breakdown[];
+	/** Leads by traffic source (Google Ads, Meta Ads, ChatGPT, Direct, ...). */
+	sources: SourceBreakdown;
 };
 
 export type SiteCounts = { site: string | null; total: number; today: number }[];
@@ -88,10 +97,27 @@ const campaignLabel = sql<string>`coalesce(
 	nullif(concat_ws(' / ', ${ctaClicks.utmSource}, ${ctaClicks.utmMedium}), ''),
 	case
 		when coalesce(${ctaClicks.gclid}, ${ctaClicks.gbraid}, ${ctaClicks.wbraid}) is not null then 'Google Ads (auto-tagged)'
-		when ${ctaClicks.fbclid} is not null then 'Meta Ads'
+		when ${ctaClicks.msclkid} is not null then 'Microsoft Ads (auto-tagged)'
+		when ${ctaClicks.ttclid} is not null then 'TikTok Ads (auto-tagged)'
+		when ${ctaClicks.liFatId} is not null then 'LinkedIn Ads (auto-tagged)'
+		when ${ctaClicks.twclid} is not null then 'X Ads (auto-tagged)'
+		when ${ctaClicks.fbclid} is not null then 'Facebook / Instagram (fbclid, no UTMs)'
 		else 'No campaign (direct, organic or referral)'
 	end
 )`;
+
+const sourceBreakdown = (where: SQL | undefined) =>
+	db
+		.select({
+			source: ctaClicks.trafficSource,
+			channel: ctaClicks.trafficChannel,
+			clicks: count()
+		})
+		.from(ctaClicks)
+		.where(where)
+		.groupBy(ctaClicks.trafficSource, ctaClicks.trafficChannel)
+		.orderBy(desc(count()), ctaClicks.trafficSource)
+		.limit(BREAKDOWN_LIMIT);
 
 /** All-time and today's lead counts per site, for the sidebar. */
 export async function getSiteCounts(timeZone: string): Promise<SiteCounts> {
@@ -106,7 +132,7 @@ export async function getSiteCounts(timeZone: string): Promise<SiteCounts> {
 }
 
 export async function getDashboard(timeZone: string, site: string | null) {
-	const [summaryRows, recent] = await Promise.all([
+	const [summaryRows, recent, sources] = await Promise.all([
 		db
 			.select({
 				total: count(),
@@ -123,13 +149,15 @@ export async function getDashboard(timeZone: string, site: string | null) {
 			.from(ctaClicks)
 			.where(forSite(site))
 			.orderBy(desc(ctaClicks.clickedAt), desc(ctaClicks.id))
-			.limit(RECENT_LIMIT)
+			.limit(RECENT_LIMIT),
+		sourceBreakdown(forSite(site))
 	]);
 
 	return {
 		loadedAt: new Date().toISOString(),
 		limit: RECENT_LIMIT,
 		summary: summaryRows[0] satisfies DashboardSummary,
+		sources: sources satisfies SourceBreakdown,
 		recent: recent.map((row): RecentClick => ({
 			...row,
 			clickedAt: row.clickedAt.toISOString(),
@@ -161,7 +189,8 @@ export async function getRangeAnalytics(
 		buttons,
 		sites,
 		origins,
-		campaigns
+		campaigns,
+		sources
 	] = await Promise.all([
 		db
 			.select({
@@ -242,7 +271,8 @@ export async function getRangeAnalytics(
 			.where(inRange)
 			.groupBy(campaignLabel)
 			.orderBy(desc(count()))
-			.limit(BREAKDOWN_LIMIT)
+			.limit(BREAKDOWN_LIMIT),
+		sourceBreakdown(inRange)
 	]);
 
 	const summary = summaryRows[0];
@@ -274,7 +304,8 @@ export async function getRangeAnalytics(
 		buttons: buttons.map((row) => ({ ...row, label: row.label ?? '' })),
 		sites,
 		origins,
-		campaigns: campaigns.map((row) => ({ label: row.label, detail: null, clicks: row.clicks }))
+		campaigns: campaigns.map((row) => ({ label: row.label, detail: null, clicks: row.clicks })),
+		sources
 	};
 }
 

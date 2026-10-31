@@ -88,7 +88,20 @@ export const ctaClicks = pgTable(
 		gclid: text('gclid'),
 		gbraid: text('gbraid'),
 		wbraid: text('wbraid'),
-		fbclid: text('fbclid')
+		fbclid: text('fbclid'),
+		msclkid: text('msclkid'),
+		ttclid: text('ttclid'),
+		liFatId: text('li_fat_id'),
+		twclid: text('twclid'),
+		// The external page the visitor arrived from (origin + path, no query) and the first page
+		// they landed on, from the same visit as the campaign above.
+		referrer: text('referrer'),
+		landingPageUrl: text('landing_page_url'),
+		// Where the visitor came from, classified by the server when the lead is recorded
+		// (src/lib/traffic-source.ts): e.g. 'Google Ads' / 'paid', 'ChatGPT' / 'ai', 'Direct' /
+		// 'direct'. Null for leads recorded before source tracking or sent by an old inline snippet.
+		trafficSource: text('traffic_source'),
+		trafficChannel: text('traffic_channel')
 	},
 	(table) => [
 		index('cta_clicks_clicked_at_idx').on(table.clickedAt),

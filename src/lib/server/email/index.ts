@@ -123,7 +123,16 @@ export async function sendTestEmail(): Promise<DeliveryResult> {
 			gclid: 'sample-gclid',
 			gbraid: null,
 			wbraid: null,
-			fbclid: null
+			fbclid: null,
+			msclkid: null,
+			ttclid: null,
+			liFatId: null,
+			twclid: null,
+			referrer: null,
+			landingPageUrl:
+				'https://www.example.com/?utm_source=google&utm_medium=cpc&gclid=sample-gclid',
+			trafficSource: 'Google Ads',
+			trafficChannel: 'paid'
 		},
 		'test email',
 		{ test: true }

@@ -39,14 +39,27 @@
 <DeletedPop />
 <WebsiteDialog />
 
-<div aria-hidden="true" class="pointer-events-none fixed inset-0 -z-10 overflow-hidden">
+<div
+	aria-hidden="true"
+	class="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
+	style:--blob={nextSite?.accent ?? 'var(--foreground)'}
+>
 	<div
 		class="absolute -top-40 left-1/2 h-[36rem] w-[60rem] -translate-x-1/2 rounded-full bg-foreground/[0.06] blur-3xl"
 	></div>
 	<!-- Tinted with the selected website's colour; fades between sites. -->
 	<div
-		class="absolute top-[-10rem] right-[-8rem] h-[28rem] w-[28rem] rounded-full opacity-[0.14] blur-3xl transition-[background-color] duration-700 ease-out dark:opacity-[0.16]"
-		style:background-color={nextSite?.accent ?? 'var(--foreground)'}
+		class="absolute top-[-10rem] right-[-8rem] h-[28rem] w-[28rem] rounded-full bg-(--blob) opacity-[0.14] blur-3xl transition-[background-color] duration-700 ease-out dark:opacity-[0.16]"
+	></div>
+	<!-- Softer companions in neighbouring hues of the same colour, spread so the page feels balanced. -->
+	<div
+		class="bg-blob-warm absolute bottom-[-12rem] left-[-10rem] h-[26rem] w-[26rem] rounded-full opacity-[0.09] blur-3xl transition-[background-color] duration-700 ease-out dark:opacity-[0.11]"
+	></div>
+	<div
+		class="bg-blob-cool absolute top-[42%] right-[-14rem] h-[22rem] w-[22rem] rounded-full opacity-[0.06] blur-3xl transition-[background-color] duration-700 ease-out dark:opacity-[0.08]"
+	></div>
+	<div
+		class="absolute bottom-[6%] left-[40%] hidden h-[18rem] w-[34rem] rounded-full bg-(--blob) opacity-[0.045] blur-3xl transition-[background-color] duration-700 ease-out md:block dark:opacity-[0.06]"
 	></div>
 	<div
 		class="absolute right-[-12rem] bottom-[-16rem] h-[30rem] w-[30rem] rounded-full bg-foreground/[0.05] blur-3xl"
@@ -133,3 +146,16 @@
 		</div>
 	</div>
 </Tooltip.Provider>
+
+<style>
+	/* The base colour first, for browsers without relative colour syntax. */
+	.bg-blob-warm {
+		background-color: var(--blob);
+		background-color: oklch(from var(--blob) l c calc(h + 40));
+	}
+
+	.bg-blob-cool {
+		background-color: var(--blob);
+		background-color: oklch(from var(--blob) l c calc(h - 45));
+	}
+</style>

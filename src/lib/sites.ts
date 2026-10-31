@@ -136,7 +136,11 @@ export const CAMPAIGN_FIELDS = [
 	{ key: 'gclid', param: 'gclid', label: 'Google Click ID (GCLID)' },
 	{ key: 'gbraid', param: 'gbraid', label: 'Google GBRAID' },
 	{ key: 'wbraid', param: 'wbraid', label: 'Google WBRAID' },
-	{ key: 'fbclid', param: 'fbclid', label: 'Meta Click ID (FBCLID)' }
+	{ key: 'fbclid', param: 'fbclid', label: 'Meta Click ID (FBCLID)' },
+	{ key: 'msclkid', param: 'msclkid', label: 'Microsoft Click ID (MSCLKID)' },
+	{ key: 'ttclid', param: 'ttclid', label: 'TikTok Click ID (TTCLID)' },
+	{ key: 'liFatId', param: 'li_fat_id', label: 'LinkedIn Click ID (LI_FAT_ID)' },
+	{ key: 'twclid', param: 'twclid', label: 'X Click ID (TWCLID)' }
 ] as const;
 export type CampaignKey = (typeof CAMPAIGN_FIELDS)[number]['key'];
 export type Campaign = Record<CampaignKey, string | null>;

@@ -20,6 +20,7 @@ import {
 	type EventType,
 	type Website
 } from '#lib/sites.ts';
+import { classifyTrafficSource } from '#lib/traffic-source.ts';
 import { waitUntil } from '@vercel/functions';
 import type { RequestHandler } from './$types';
 
@@ -37,7 +38,17 @@ const MAX_CAMPAIGN_LENGTH = 255;
 const BUTTON_TYPE_PATTERN = /^[a-z0-9_-]{1,40}$/;
 // Ad click IDs are URL-safe tokens; anything else is not a real click ID.
 const CLICK_ID_PATTERN = /^[\w.~-]{1,255}$/;
-const CLICK_ID_KEYS = new Set<CampaignKey>(['gclid', 'gbraid', 'wbraid', 'fbclid']);
+const CLICK_ID_KEYS = new Set<CampaignKey>([
+	'gclid',
+	'gbraid',
+	'wbraid',
+	'fbclid',
+	'msclkid',
+	'ttclid',
+	'liFatId',
+	'twclid'
+]);
+const MAX_REFERRER_LENGTH = 512;
 // Accept client timestamps only within this window around server time; outside it (bad device
 // clock, replayed request) the server's own time is used instead.
 const MAX_CLOCK_SKEW_PAST_MS = 24 * 60 * 60_000;
@@ -70,7 +81,11 @@ type ClickPayload = {
 	placement?: unknown;
 	/** Form submissions: the CTA clicked shortly before, as { type, text, placement, pageUrl, clickedAt }. */
 	source?: unknown;
-	/** Campaign parameters from the landing page: { utmSource, ..., gclid, gbraid, wbraid, fbclid }. */
+	/**
+	 * The visit that brought the visitor: campaign parameters from the landing page ({ utmSource,
+	 * ..., gclid, fbclid, msclkid, ... }) plus `referrer` (the external page they came from, '' for
+	 * none) and `landingPage`. Trackers that send `referrer` get a traffic source, Direct included.
+	 */
 	attribution?: unknown;
 };
 
@@ -234,14 +249,64 @@ function parseSource(value: unknown, now: Date, website: Website): SourceCta {
 	return parsed;
 }
 
-function parseAttribution(value: unknown): Campaign {
-	const attribution = asRecord(value) ?? {};
+type Attribution = Campaign &
+	Pick<
+		typeof ctaClicks.$inferInsert,
+		'referrer' | 'landingPageUrl' | 'trafficSource' | 'trafficChannel'
+	>;
+
+/** An external page as origin + path (no query: it can hold search terms or personal data). */
+function parseReferrer(value: unknown): string | null {
+	if (typeof value !== 'string' || !value || value.length > MAX_URL_LENGTH) return null;
+	try {
+		const url = new URL(value);
+		if (url.protocol === 'android-app:') return `android-app://${url.hostname}`.slice(0, 255);
+		if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+		return `${url.origin}${url.pathname}`.slice(0, MAX_REFERRER_LENGTH);
+	} catch {
+		return null;
+	}
+}
+
+function parseAttribution(value: unknown, website: Website): Attribution {
+	const attribution = asRecord(value);
 	const campaign = {} as Campaign;
 	for (const { key } of CAMPAIGN_FIELDS) {
-		const text = optionalText(attribution[key], MAX_CAMPAIGN_LENGTH);
+		const text = optionalText(attribution?.[key], MAX_CAMPAIGN_LENGTH);
 		campaign[key] = text && CLICK_ID_KEYS.has(key) && !CLICK_ID_PATTERN.test(text) ? null : text;
 	}
-	return campaign;
+
+	let referrer = parseReferrer(attribution?.referrer);
+	// The website's own pages (or another of its domains) aren't where the visitor came from.
+	if (
+		referrer &&
+		/^https?:/.test(referrer) &&
+		websiteOwnsHost(website, new URL(referrer).hostname)
+	) {
+		referrer = null;
+	}
+	let landingPageUrl: string | null = null;
+	try {
+		const url = parsePageUrl(attribution?.landingPage);
+		if (websiteOwnsHost(website, url.hostname)) landingPageUrl = url.href;
+	} catch {
+		// Not a page of this website: leave it out.
+	}
+
+	// Trackers that report the referrer (even an empty one) report every visit, so no campaign and
+	// no referrer means a direct visit. Older snippets send neither: their source is unknown.
+	const reportsVisit = typeof attribution?.referrer === 'string';
+	const hasCampaign = CAMPAIGN_FIELDS.some(({ key }) => campaign[key]);
+	const traffic =
+		reportsVisit || hasCampaign ? classifyTrafficSource({ ...campaign, referrer }) : null;
+
+	return {
+		...campaign,
+		referrer,
+		landingPageUrl,
+		trafficSource: traffic?.source ?? null,
+		trafficChannel: traffic?.channel ?? null
+	};
 }
 
 /**
@@ -364,7 +429,7 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 			// A CTA click has its own placement; a form submission is credited to an earlier CTA.
 			ctaPlacement: eventType === 'cta_click' ? parsePlacement(payload.placement) : null,
 			...(eventType === 'form_submit' ? parseSource(payload.source, now, website) : NO_SOURCE),
-			...parseAttribution(payload.attribution)
+			...parseAttribution(payload.attribution, website)
 		};
 	} catch (error) {
 		if (error instanceof ValidationError) return json({ error: error.message }, 400, headers);

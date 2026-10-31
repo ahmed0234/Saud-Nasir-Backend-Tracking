@@ -9,6 +9,7 @@
 	import { placementLabel } from '#lib/lead-attribution.ts';
 	import PageHeader from '#lib/components/dashboard/page-header.svelte';
 	import RankedList from '#lib/components/dashboard/ranked-list.svelte';
+	import TrafficSourceLabel from '#lib/components/dashboard/traffic-source-label.svelte';
 	import InstallStatus from '#lib/components/dashboard/install-status.svelte';
 	import SiteBadge from '#lib/components/dashboard/site-badge.svelte';
 	import StatCard from '#lib/components/dashboard/stat-card.svelte';
@@ -326,6 +327,32 @@
 
 				<div class="grid gap-6 lg:grid-cols-2" data-stagger>
 					<RankedList
+						title="Lead sources"
+						description="Where each lead's visitor came from: ad platform, search, social, AI, referral or direct"
+						items={analytics.sources.map((row) => ({
+							...row,
+							key: `${row.source ?? ''}|${row.channel ?? ''}`
+						}))}
+						total={summary.total}
+					>
+						{#snippet label(item)}
+							<TrafficSourceLabel source={item.source} channel={item.channel} />
+						{/snippet}
+					</RankedList>
+					<RankedList
+						title="Campaigns"
+						description="UTM source / medium, or the ad network for auto-tagged ad clicks"
+						items={analytics.campaigns.map((row) => ({ ...row, key: row.label }))}
+						total={summary.total}
+					>
+						{#snippet label(item)}
+							<span class="font-medium">{item.label}</span>
+						{/snippet}
+					</RankedList>
+				</div>
+
+				<div class={cn('grid gap-6', !site && 'lg:grid-cols-2')} data-stagger>
+					<RankedList
 						title="Lead origin"
 						description="Where on the website the CTA behind each lead was"
 						items={analytics.origins.map((row) => ({ ...row, key: row.placement ?? 'none' }))}
@@ -346,37 +373,26 @@
 							{/if}
 						{/snippet}
 					</RankedList>
-					<RankedList
-						title="Campaigns"
-						description="UTM source / medium, or the ad network for auto-tagged ad clicks"
-						items={analytics.campaigns.map((row) => ({ ...row, key: row.label }))}
-						total={summary.total}
-					>
-						{#snippet label(item)}
-							<span class="font-medium">{item.label}</span>
-						{/snippet}
-					</RankedList>
+					{#if !site}
+						<RankedList
+							title="Leads by website"
+							description="Which website each lead came from"
+							items={analytics.sites.map((row) => ({ ...row, key: row.site ?? 'other' }))}
+							total={summary.total}
+						>
+							{#snippet label(item)}
+								{@const itemSite = findWebsite(data.websites, item.site)}
+								<span class="inline-flex items-center gap-2 font-medium">
+									<span
+										class="size-2 rounded-full"
+										style:background-color={itemSite?.accent ?? 'var(--muted-foreground)'}
+									></span>
+									{itemSite?.name ?? 'Other domains'}
+								</span>
+							{/snippet}
+						</RankedList>
+					{/if}
 				</div>
-
-				{#if !site}
-					<RankedList
-						title="Leads by website"
-						description="Which website each lead came from"
-						items={analytics.sites.map((row) => ({ ...row, key: row.site ?? 'other' }))}
-						total={summary.total}
-					>
-						{#snippet label(item)}
-							{@const itemSite = findWebsite(data.websites, item.site)}
-							<span class="inline-flex items-center gap-2 font-medium">
-								<span
-									class="size-2 rounded-full"
-									style:background-color={itemSite?.accent ?? 'var(--muted-foreground)'}
-								></span>
-								{itemSite?.name ?? 'Other domains'}
-							</span>
-						{/snippet}
-					</RankedList>
-				{/if}
 
 				<div class="grid gap-6 lg:grid-cols-2" data-stagger>
 					<RankedList

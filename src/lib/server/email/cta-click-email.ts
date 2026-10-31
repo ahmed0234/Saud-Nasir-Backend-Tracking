@@ -1,9 +1,9 @@
 import {
-	adNetworks,
 	campaignDetails,
 	campaignSummary,
 	leadOrigin,
-	sourceCtaSummary
+	sourceCtaSummary,
+	trafficSourceSummary
 } from '#lib/lead-attribution.ts';
 import { buttonTypeLabel, EVENT_TYPE_LABELS, isEventType, type CampaignKey } from '#lib/sites.ts';
 import type { CtaClick } from '../db/schema.ts';
@@ -24,6 +24,10 @@ export type CtaClickEmailDetails = Pick<
 	| 'sourceCtaType'
 	| 'sourceCtaText'
 	| 'sourceCtaPlacement'
+	| 'referrer'
+	| 'landingPageUrl'
+	| 'trafficSource'
+	| 'trafficChannel'
 	| CampaignKey
 > & {
 	/** The website's name in the dashboard. */
@@ -76,13 +80,16 @@ export function renderCtaClickEmail(click: CtaClickEmailDetails, { test = false 
 		{ label: 'Lead type', value: leadType },
 		{ label: isForm ? 'Submit button' : 'Button', value: button || NOT_AVAILABLE },
 		...(isForm ? [{ label: 'Form', value: click.formName ?? NOT_AVAILABLE }] : []),
+		{ label: 'Traffic source', value: trafficSourceSummary(click) },
+		...(click.referrer ? [{ label: 'Came from', value: click.referrer, mono: true }] : []),
+		...(click.landingPageUrl
+			? [{ label: 'Landing page', value: click.landingPageUrl, href: click.landingPageUrl }]
+			: []),
 		{ label: 'Lead origin', value: leadOrigin(click) ?? NOT_AVAILABLE },
 		...(isForm ? [{ label: 'Source CTA', value: sourceCtaSummary(click) ?? 'None recorded' }] : []),
 		{
 			label: 'Campaign',
-			value:
-				[campaignSummary(click), adNetworks(click).join(', ')].filter(Boolean).join(' · ') ||
-				'None recorded'
+			value: campaignSummary(click) ?? 'None recorded'
 		},
 		...campaignDetails(click).map((detail) => ({ ...detail, mono: true })),
 		{ label: 'Page path', value: path },

@@ -5,6 +5,12 @@ import {
 	isCtaPlacement,
 	type Campaign
 } from './sites.ts';
+import {
+	isTrafficChannel,
+	SOURCE_NOT_RECORDED,
+	TRAFFIC_CHANNEL_LABELS,
+	type TrafficChannel
+} from './traffic-source.ts';
 
 // Human-readable attribution for a lead, shared by the dashboard, the CSV export and the email.
 
@@ -45,12 +51,33 @@ export function campaignSummary(campaign: Campaign): string | null {
 	return [sourceMedium, campaign.utmCampaign].filter(Boolean).join(' · ') || null;
 }
 
-/** Ad networks whose click IDs are present: "Google Ads" (gclid/gbraid/wbraid), "Meta Ads". */
-export function adNetworks(campaign: Campaign): string[] {
-	const networks: string[] = [];
-	if (campaign.gclid || campaign.gbraid || campaign.wbraid) networks.push('Google Ads');
-	if (campaign.fbclid) networks.push('Meta Ads');
-	return networks;
+export type LeadTraffic = {
+	trafficSource: string | null;
+	trafficChannel: string | null;
+	referrer?: string | null;
+	landingPageUrl?: string | null;
+};
+
+/** The lead's traffic source and channel, e.g. { source: "Google Ads", channel: "paid" }, or null. */
+export function trafficSourceOf(
+	lead: Pick<LeadTraffic, 'trafficSource' | 'trafficChannel'>
+): { source: string; channel: TrafficChannel | null; channelLabel: string | null } | null {
+	if (!lead.trafficSource) return null;
+	const channel = isTrafficChannel(lead.trafficChannel) ? lead.trafficChannel : null;
+	return {
+		source: lead.trafficSource,
+		channel,
+		channelLabel: channel ? TRAFFIC_CHANNEL_LABELS[channel] : null
+	};
+}
+
+/** "Google Ads (Paid ads)", or "Not recorded" for leads without a source. */
+export function trafficSourceSummary(lead: LeadTraffic): string {
+	const traffic = trafficSourceOf(lead);
+	if (!traffic) return SOURCE_NOT_RECORDED;
+	return traffic.channelLabel && traffic.channelLabel !== traffic.source
+		? `${traffic.source} (${traffic.channelLabel})`
+		: traffic.source;
 }
 
 /** Every campaign value present, labelled (for tooltips and emails). */

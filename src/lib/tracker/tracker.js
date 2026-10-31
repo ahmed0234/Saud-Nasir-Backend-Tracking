@@ -35,9 +35,14 @@
  * Placement: a CTA in the site header, the top bar or a mobile slide-out menu is "header"; in the
  * footer "footer"; anywhere else "page". Header leads get a green "Header CTA" badge.
  *
- * Campaigns: utm_source, utm_medium, utm_campaign, utm_term, utm_content, gclid, gbraid, wbraid
- * and fbclid are read from the landing page URL, kept in this browser for 90 days (a newer
- * campaign visit replaces them) and attached to every lead.
+ * Traffic source: the visit that brought the visitor is kept in this browser for 90 days and
+ * attached to every lead: utm_source, utm_medium, utm_campaign, utm_term, utm_content and the ad
+ * click IDs (gclid, gbraid, wbraid, fbclid, msclkid, ttclid, li_fat_id, twclid) from the landing
+ * page URL, the external site the visitor came from (document.referrer, without its query) and
+ * the landing page. A newer visit with campaign parameters always replaces it; a visit from
+ * another site without them only replaces a visit that had none, so a later organic return
+ * doesn't erase the ad click that found the visitor. The backend turns this into the lead's
+ * source ("Google Ads", "Meta Ads", "ChatGPT", "Direct", ...), so the rules can change there.
  *
  * Overrides (Elementor → Advanced → CSS Classes, on the widget or the link):
  *     lead-cta       always treat as a CTA        no-lead-cta     never track
@@ -201,8 +206,13 @@
 		['gclid', 'gclid'],
 		['gbraid', 'gbraid'],
 		['wbraid', 'wbraid'],
-		['fbclid', 'fbclid']
+		['fbclid', 'fbclid'],
+		['msclkid', 'msclkid'],
+		['ttclid', 'ttclid'],
+		['li_fat_id', 'liFatId'],
+		['twclid', 'twclid']
 	];
+	var MAX_LANDING_URL = 1024;
 
 	function log() {
 		if (debug && window.console) {
@@ -274,38 +284,74 @@
 		return age >= -60000 && age <= ttl;
 	}
 
-	/** Saves this page's campaign parameters, if it has any; a newer campaign visit replaces older ones. */
-	function captureCampaign() {
+	/**
+	 * The external page this visit came from as origin + path ('' for none, this website itself, or
+	 * a return from the Housecall Pro booking flow). Android apps report android-app://<package>.
+	 */
+	function externalReferrer() {
+		var url = document.referrer && parseUrl(document.referrer);
+		if (!url) return '';
+		if (url.protocol === 'android-app:') return 'android-app://' + url.hostname;
+		if (!/^https?:$/.test(url.protocol) || sameSite(url) || isHousecallPro(url)) return '';
+		return (url.origin + url.pathname).slice(0, MAX_CAMPAIGN_VALUE);
+	}
+
+	function hasCampaign(visit) {
+		for (var i = 0; i < CAMPAIGN_PARAMS.length; i++) {
+			if (visit && visit[CAMPAIGN_PARAMS[i][1]]) return true;
+		}
+		return false;
+	}
+
+	/**
+	 * Records the visit that brought the visitor here: campaign parameters from this page's URL,
+	 * the external referrer and the landing page. Campaign visits always replace the stored one; a
+	 * referral replaces only a visit without campaign parameters; a direct visit or a page view
+	 * inside the website keeps what is stored (and starts a "direct" visit when nothing is).
+	 */
+	function captureVisit() {
 		var params;
 		try {
 			params = new URLSearchParams(search);
 		} catch (_error) {
-			return;
+			params = null;
 		}
-		var campaign = null;
-		for (var i = 0; i < CAMPAIGN_PARAMS.length; i++) {
+		var visit = {
+			referrer: externalReferrer(),
+			landingPage: window.location.href.slice(0, MAX_LANDING_URL),
+			at: Date.now()
+		};
+		for (var i = 0; params && i < CAMPAIGN_PARAMS.length; i++) {
 			var value = (params.get(CAMPAIGN_PARAMS[i][0]) || '').trim();
-			if (value) {
-				campaign = campaign || {};
-				campaign[CAMPAIGN_PARAMS[i][1]] = value.slice(0, MAX_CAMPAIGN_VALUE);
-			}
+			if (value) visit[CAMPAIGN_PARAMS[i][1]] = value.slice(0, MAX_CAMPAIGN_VALUE);
 		}
-		if (campaign) {
-			campaign.at = Date.now();
-			writeStored('campaign', campaign);
-			log('campaign saved', campaign);
+
+		var stored = readStored('campaign');
+		var fresh = isFresh(stored, CAMPAIGN_TTL_MS);
+		var replace = hasCampaign(visit)
+			? true
+			: visit.referrer
+				? !fresh || !hasCampaign(stored)
+				: !fresh;
+		if (replace) {
+			writeStored('campaign', visit);
+			log('visit saved', visit);
 		}
 	}
 
-	function currentCampaign() {
+	/** The stored visit for a lead's `attribution`; `referrer` is always sent ('' = direct). */
+	function currentVisit() {
 		var stored = readStored('campaign');
-		if (!isFresh(stored, CAMPAIGN_TTL_MS)) return null;
-		var campaign = {};
+		if (!isFresh(stored, CAMPAIGN_TTL_MS)) stored = {};
+		var visit = { referrer: typeof stored.referrer === 'string' ? stored.referrer : '' };
+		if (typeof stored.landingPage === 'string' && stored.landingPage) {
+			visit.landingPage = stored.landingPage;
+		}
 		for (var i = 0; i < CAMPAIGN_PARAMS.length; i++) {
 			var key = CAMPAIGN_PARAMS[i][1];
-			if (typeof stored[key] === 'string' && stored[key]) campaign[key] = stored[key];
+			if (typeof stored[key] === 'string' && stored[key]) visit[key] = stored[key];
 		}
-		return campaign;
+		return visit;
 	}
 
 	function rememberCta(cta) {
@@ -549,8 +595,7 @@
 		for (var key in details) {
 			if (details[key]) payload[key] = details[key];
 		}
-		var campaign = currentCampaign();
-		if (campaign) payload.attribution = campaign;
+		if (details.eventType !== 'ping') payload.attribution = currentVisit();
 		var body = JSON.stringify(payload);
 
 		if (typeof fetch === 'function') {
@@ -676,7 +721,7 @@
 	}
 
 	try {
-		captureCampaign();
+		captureVisit();
 		pingIfDue();
 	} catch (_error) {
 		// Tracking must never break the page.

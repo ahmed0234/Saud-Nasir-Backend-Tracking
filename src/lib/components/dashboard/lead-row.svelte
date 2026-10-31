@@ -3,13 +3,14 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { Checkbox } from '#lib/components/ui/checkbox/index.js';
 	import HeaderCtaBadge from '#lib/components/dashboard/header-cta-badge.svelte';
+	import TrafficSourceBadge from '#lib/components/dashboard/traffic-source-badge.svelte';
 	import { formatDateTime, formatUtc, splitUrl } from '#lib/format.ts';
 	import {
-		adNetworks,
 		campaignDetails,
 		campaignSummary,
 		leadOrigin,
-		sourceCtaSummary
+		sourceCtaSummary,
+		trafficSourceOf
 	} from '#lib/lead-attribution.ts';
 	import type { RecentClick } from '#lib/server/analytics.ts';
 	import { buttonTypeLabel, EVENT_TYPE_LABELS, findWebsite, isEventType } from '#lib/sites.ts';
@@ -64,11 +65,24 @@
 	const buttonLabel = $derived(buttonTypeLabel(lead.buttonType));
 	const title = $derived(lead.buttonText ?? (isForm ? lead.formName : null) ?? buttonLabel ?? kind);
 	const location = $derived([lead.city, lead.state].filter(Boolean).join(', '));
-	// Attribution: where the lead's CTA was, which CTA a form is credited to, and its campaign.
+	// Attribution: where the visitor came from, where the lead's CTA was, which CTA a form is
+	// credited to, and its campaign.
+	const traffic = $derived(trafficSourceOf(lead));
 	const origin = $derived(leadOrigin(lead));
 	const source = $derived(sourceCtaSummary(lead));
 	const campaign = $derived(campaignSummary(lead));
-	const networks = $derived(adNetworks(lead));
+	const trafficTitle = $derived(
+		traffic
+			? [
+					`Source: ${traffic.source}${traffic.channelLabel ? ` · ${traffic.channelLabel}` : ''}`,
+					lead.referrer && `Came from: ${lead.referrer}`,
+					lead.landingPageUrl && `Landing page: ${lead.landingPageUrl}`,
+					...campaignDetails(lead).map((detail) => `${detail.label}: ${detail.value}`)
+				]
+					.filter(Boolean)
+					.join('\n')
+			: undefined
+	);
 </script>
 
 <div
@@ -128,10 +142,17 @@
 					<span aria-hidden="true">·</span><span class="shrink-0">{origin}</span>
 				{/if}
 			</p>
-			{#if source || campaign || networks.length > 0}
+			{#if traffic || source || campaign}
 				<p
 					class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
 				>
+					{#if traffic}
+						<TrafficSourceBadge
+							source={lead.trafficSource}
+							channel={lead.trafficChannel}
+							title={trafficTitle}
+						/>
+					{/if}
 					{#if source}
 						<span
 							class="inline-flex min-w-0 items-center gap-1"
@@ -141,7 +162,7 @@
 							<span class="truncate">via {source}</span>
 						</span>
 					{/if}
-					{#if campaign || networks.length > 0}
+					{#if campaign}
 						<span
 							class="inline-flex min-w-0 items-center gap-1"
 							title={campaignDetails(lead)
@@ -149,13 +170,7 @@
 								.join('\n')}
 						>
 							<MegaphoneIcon class="size-3 shrink-0" />
-							{#if campaign}<span class="truncate">{campaign}</span>{/if}
-							{#each networks as network (network)}
-								<span
-									class="shrink-0 rounded bg-foreground/[0.06] px-1.5 py-px text-[10px] font-medium text-foreground/80 ring-1 ring-foreground/10"
-									>{network}</span
-								>
-							{/each}
+							<span class="truncate">{campaign}</span>
 						</span>
 					{/if}
 				</p>
