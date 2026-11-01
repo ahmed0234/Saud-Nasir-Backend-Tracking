@@ -7,8 +7,10 @@ import {
 } from './sites.ts';
 import {
 	isTrafficChannel,
-	SOURCE_NOT_RECORDED,
+	LEAD_SOURCE_LABELS,
+	leadSourceOf,
 	TRAFFIC_CHANNEL_LABELS,
+	type LeadSourceMatch,
 	type TrafficChannel
 } from './traffic-source.ts';
 
@@ -71,10 +73,25 @@ export function trafficSourceOf(
 	};
 }
 
-/** "Google Ads (Paid ads)", or "Not recorded" for leads without a source. */
-export function trafficSourceSummary(lead: LeadTraffic): string {
+/** The lead's source among the six (Organic, Yelp, Instagram, ...), or null. */
+export function leadSourceOfLead(
+	lead: Pick<LeadTraffic, 'trafficSource' | 'trafficChannel'>
+): LeadSourceMatch | null {
+	return leadSourceOf(lead.trafficSource, lead.trafficChannel);
+}
+
+/**
+ * "Organic (Google search)", "Instagram", "AI (ChatGPT)"; for a source outside the six its own
+ * name, e.g. "Google Ads (Paid ads)"; null when the lead has no source data.
+ */
+export function trafficSourceSummary(lead: LeadTraffic): string | null {
+	const match = leadSourceOfLead(lead);
+	if (match) {
+		const label = LEAD_SOURCE_LABELS[match.key];
+		return match.detail ? `${label} (${match.detail})` : label;
+	}
 	const traffic = trafficSourceOf(lead);
-	if (!traffic) return SOURCE_NOT_RECORDED;
+	if (!traffic) return null;
 	return traffic.channelLabel && traffic.channelLabel !== traffic.source
 		? `${traffic.source} (${traffic.channelLabel})`
 		: traffic.source;

@@ -31,12 +31,10 @@ export function isTrafficChannel(value: unknown): value is TrafficChannel {
 	return typeof value === 'string' && (TRAFFIC_CHANNELS as readonly string[]).includes(value);
 }
 
-/** Shown for leads recorded before source tracking, or sent by an old inline snippet. */
-export const SOURCE_NOT_RECORDED = 'Not recorded';
-
 export type TrafficInput = {
 	utmSource: string | null;
 	utmMedium: string | null;
+	utmCampaign: string | null;
 	gclid: string | null;
 	gbraid: string | null;
 	wbraid: string | null;
@@ -68,8 +66,8 @@ const GOOGLE_BUSINESS: Platform = {
 const YOUTUBE: Platform = { ads: 'Google Ads', organic: 'YouTube', channel: 'social' };
 const MICROSOFT: Platform = { ads: 'Microsoft Ads', organic: 'Bing', channel: 'search' };
 const META: Platform = { ads: 'Meta Ads', organic: 'Facebook / Instagram', channel: 'social' };
-const FACEBOOK: Platform = { ads: 'Meta Ads', organic: 'Facebook', channel: 'social' };
-const INSTAGRAM: Platform = { ads: 'Meta Ads', organic: 'Instagram', channel: 'social' };
+const FACEBOOK: Platform = { ads: 'Facebook Ads', organic: 'Facebook', channel: 'social' };
+const INSTAGRAM: Platform = { ads: 'Instagram Ads', organic: 'Instagram', channel: 'social' };
 const CHATGPT: Platform = { ads: 'ChatGPT Ads', organic: 'ChatGPT', channel: 'ai' };
 const TIKTOK: Platform = { ads: 'TikTok Ads', organic: 'TikTok', channel: 'social' };
 const LINKEDIN: Platform = { ads: 'LinkedIn Ads', organic: 'LinkedIn', channel: 'social' };
@@ -82,6 +80,14 @@ const PERPLEXITY: Platform = { ads: 'Perplexity Ads', organic: 'Perplexity', cha
 const GEMINI: Platform = { ads: 'Google Ads', organic: 'Gemini', channel: 'ai' };
 const COPILOT: Platform = { ads: 'Microsoft Ads', organic: 'Copilot', channel: 'ai' };
 const CLAUDE: Platform = { ads: 'Claude', organic: 'Claude', channel: 'ai' };
+const ai = (name: string): Platform => ({ ads: `${name} Ads`, organic: name, channel: 'ai' });
+const META_AI = ai('Meta AI');
+const GROK = ai('Grok');
+const DEEPSEEK = ai('DeepSeek');
+const MISTRAL = ai('Mistral');
+const YOU = ai('You.com');
+const PHIND = ai('Phind');
+const POE = ai('Poe');
 
 const search = (name: string): Platform => ({
 	ads: `${name} Ads`,
@@ -110,7 +116,8 @@ const UTM_SOURCES: Record<string, Platform> = {
 	bingads: MICROSOFT,
 	meta: META,
 	metaads: META,
-	facebookads: META,
+	facebookads: FACEBOOK,
+	instagramads: INSTAGRAM,
 	facebook: FACEBOOK,
 	fb: FACEBOOK,
 	messenger: FACEBOOK,
@@ -135,7 +142,15 @@ const UTM_SOURCES: Record<string, Platform> = {
 	perplexity: PERPLEXITY,
 	gemini: GEMINI,
 	copilot: COPILOT,
-	claude: CLAUDE
+	claude: CLAUDE,
+	anthropic: CLAUDE,
+	metaai: META_AI,
+	grok: GROK,
+	deepseek: DEEPSEEK,
+	mistral: MISTRAL,
+	lechat: MISTRAL,
+	phind: PHIND,
+	poe: POE
 };
 
 // Referring hostnames (without "www.") → platform. Checked in order, first match wins, so the
@@ -150,12 +165,19 @@ const REFERRERS: [RegExp, Platform | 'ads-google'][] = [
 	[/^(business|maps)\.google\.[a-z.]+$|^g\.page$|^maps\.app\.goo\.gl$/, GOOGLE_BUSINESS],
 	[/^([a-z0-9-]+\.)?google\.[a-z.]+$/, GOOGLE],
 	[/^(m\.)?youtube\.com$|^youtu\.be$/, YOUTUBE],
-	[/^copilot\.microsoft\.com$/, COPILOT],
+	[/^copilot\.microsoft\.com$|^copilot\.cloud\.microsoft$|^edgeservices\.bing\.com$/, COPILOT],
 	[/^(outlook\.(live|office|office365)\.com)$/, email('Outlook')],
 	[/^(bat\.)?bing\.com$/, MICROSOFT],
 	[/^(chatgpt\.com|chat\.openai\.com|([a-z0-9-]+\.)?openai\.com)$/, CHATGPT],
 	[/^(([a-z0-9-]+\.)?perplexity\.ai)$/, PERPLEXITY],
 	[/^claude\.ai$/, CLAUDE],
+	[/^meta\.ai$/, META_AI],
+	[/^(grok\.com|x\.ai)$/, GROK],
+	[/^(chat\.)?deepseek\.com$/, DEEPSEEK],
+	[/^chat\.mistral\.ai$/, MISTRAL],
+	[/^you\.com$/, YOU],
+	[/^phind\.com$/, PHIND],
+	[/^poe\.com$/, POE],
 	[/^(([a-z0-9-]+\.)?facebook\.com|fb\.com|fb\.me|messenger\.com)$/, FACEBOOK],
 	[/^(([a-z0-9-]+\.)?instagram\.com)$/, INSTAGRAM],
 	[/^(([a-z0-9-]+\.)?tiktok\.com)$/, TIKTOK],
@@ -184,6 +206,10 @@ const ANDROID_APPS: Record<string, Platform> = {
 	'com.facebook.orca': FACEBOOK,
 	'com.instagram.android': INSTAGRAM,
 	'com.openai.chatgpt': CHATGPT,
+	'com.google.android.apps.bard': GEMINI,
+	'com.microsoft.copilot': COPILOT,
+	'ai.perplexity.app.android': PERPLEXITY,
+	'com.anthropic.claude': CLAUDE,
 	'com.linkedin.android': LINKEDIN,
 	'com.twitter.android': X,
 	'com.zhiliaoapp.musically': TIKTOK,
@@ -207,6 +233,12 @@ const AI_MEDIUM = /^(ai|llm|chatbot|assistant)$/i;
 const ADS_IN_SOURCE = /(^|[_ .-])ads?([_ .-]|$)|ads$/i;
 
 const MAX_LABEL = 60;
+const BUSINESS_PROFILE_TAG =
+	/^(gbp|gmb|maps|local|listing)$|(^|[_ -])(gbp|gmb|google[_ -]?(my[_ -]?)?business([_ -]?profile)?|business[_ -]?profile)([_ -]|$)/i;
+
+function isBusinessProfileTag(medium: string, campaign: string | null): boolean {
+	return BUSINESS_PROFILE_TAG.test(medium) || BUSINESS_PROFILE_TAG.test(campaign?.trim() ?? '');
+}
 
 function normalizeSource(value: string): string {
 	return value
@@ -270,7 +302,12 @@ export function classifyTrafficSource(input: TrafficInput): TrafficSource {
 	const medium = input.utmMedium?.trim() ?? '';
 	if (utmSource) {
 		const paid = PAID_MEDIUM.test(medium) || ADS_IN_SOURCE.test(utmSource);
-		const platform = UTM_SOURCES[normalizeSource(utmSource)];
+		let platform = UTM_SOURCES[normalizeSource(utmSource)];
+		// utm_source=google&utm_medium=organic&utm_campaign=gbp, Google's own suggestion for
+		// Business Profile links, names the profile in the medium or the campaign.
+		if (platform === GOOGLE && !paid && isBusinessProfileTag(medium, input.utmCampaign)) {
+			platform = GOOGLE_BUSINESS;
+		}
 		if (platform) {
 			// fbclid alone doesn't say paid, but a Meta source tagged as an ad does.
 			return fromPlatform(platform, paid);
@@ -311,3 +348,87 @@ export function classifyTrafficSource(input: TrafficInput): TrafficSource {
 
 	return { source: 'Direct', channel: 'direct' };
 }
+
+// ---------------------------------------------------------------------------------------------
+// The six lead sources the dashboard reports. Each lead's stored traffic source / channel maps to
+// at most one of them; a lead outside all six (Google Ads, email, another website) or without
+// source data maps to none and keeps its own stored attribution.
+
+export const LEAD_SOURCES = [
+	'organic',
+	'yelp',
+	'instagram',
+	'facebook',
+	'google_business_profile',
+	'ai'
+] as const;
+export type LeadSource = (typeof LEAD_SOURCES)[number];
+
+export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
+	organic: 'Organic',
+	yelp: 'Yelp',
+	instagram: 'Instagram',
+	facebook: 'Facebook',
+	google_business_profile: 'Google Business Profile',
+	ai: 'AI'
+};
+
+export const LEAD_SOURCE_DESCRIPTIONS: Record<LeadSource, string> = {
+	organic: 'Google (or another search engine) search, or typed the address directly',
+	yelp: 'Yelp listing, app or Yelp-tagged links',
+	instagram: 'Instagram profile, posts, stories or ads',
+	facebook: 'Facebook page, posts, Messenger or ads',
+	google_business_profile: 'Google Business Profile (Maps / local listing) links',
+	ai: 'ChatGPT, Perplexity, Gemini, Copilot, Claude and other AI assistants'
+};
+
+const ORGANIC_SEARCH_ENGINES = new Set([
+	'Google',
+	'Bing',
+	'Yahoo',
+	'DuckDuckGo',
+	'Ecosia',
+	'Brave Search',
+	'Baidu',
+	'Yandex'
+]);
+
+const LEAD_SOURCE_BY_TRAFFIC: Record<string, LeadSource> = {
+	'Google Business Profile': 'google_business_profile',
+	Yelp: 'yelp',
+	'Yelp Ads': 'yelp',
+	Instagram: 'instagram',
+	'Instagram Ads': 'instagram',
+	Facebook: 'facebook',
+	'Facebook Ads': 'facebook'
+};
+
+export type LeadSourceMatch = {
+	key: LeadSource;
+	/** What exactly inside the category, e.g. "Google search", "Direct visit", "ChatGPT", "Ad". */
+	detail: string | null;
+};
+
+/**
+ * The lead source (one of the six) for a stored traffic source / channel, or null when the lead
+ * has no source data or came from somewhere outside the six. Pure, so the dashboard, the CSV and
+ * the email always agree.
+ */
+export function leadSourceOf(
+	source: string | null,
+	channel: string | null
+): LeadSourceMatch | null {
+	if (!source) return null;
+	if (channel === 'direct') return { key: 'organic', detail: 'Direct visit' };
+	if (channel === 'search' && ORGANIC_SEARCH_ENGINES.has(source)) {
+		return { key: 'organic', detail: `${source} search` };
+	}
+	const key = LEAD_SOURCE_BY_TRAFFIC[source];
+	if (key) return { key, detail: channel === 'paid' ? 'Ad' : null };
+	if (channel === 'ai' || (channel === 'paid' && AI_ADS.has(source))) {
+		return { key: 'ai', detail: source };
+	}
+	return null;
+}
+
+const AI_ADS = new Set(['ChatGPT Ads', 'Perplexity Ads']);

@@ -1,5 +1,6 @@
 import { count, countDistinct, desc, eq, gte, lt, and, sql, type SQL } from 'drizzle-orm';
 import type { Campaign } from '#lib/sites.ts';
+import { LEAD_SOURCES, leadSourceOf, type LeadSource } from '#lib/traffic-source.ts';
 import { db } from './db/index.ts';
 import { ctaClicks } from './db/schema.ts';
 
@@ -41,8 +42,20 @@ export type RecentClick = Campaign & {
 	trafficChannel: string | null;
 };
 
-/** Leads per traffic source; source and channel are null for leads recorded without one. */
-export type SourceBreakdown = { source: string | null; channel: string | null; clicks: number }[];
+/**
+ * Leads per lead source (always all six, most leads first), each split by what's inside it
+ * (Organic: Google search / Direct visit, AI: ChatGPT / Perplexity, ...). Shares are of
+ * `attributed`; leads from other sources (Google Ads, email, other websites) and leads without
+ * source data are only counted, never shown as a category.
+ */
+export type SourceBreakdown = {
+	items: { key: LeadSource; leads: number; details: { label: string; leads: number }[] }[];
+	attributed: number;
+	/** Leads with a known source outside the six. */
+	other: number;
+	/** Leads without source data (recorded before source tracking, or by an old snippet). */
+	unknown: number;
+};
 
 export type Bucket = { start: string; clicks: number };
 export type Breakdown = { label: string; detail: string | null; clicks: number };
@@ -70,7 +83,7 @@ export type RangeAnalytics = {
 	origins: { placement: string | null; clicks: number }[];
 	/** Leads by UTM source / medium, or by ad network when only a click ID was present. */
 	campaigns: Breakdown[];
-	/** Leads by traffic source (Google Ads, Meta Ads, ChatGPT, Direct, ...). */
+	/** Leads by lead source (Organic, Yelp, Instagram, Facebook, Google Business Profile, AI). */
 	sources: SourceBreakdown;
 };
 
@@ -106,18 +119,57 @@ const campaignLabel = sql<string>`coalesce(
 	end
 )`;
 
-const sourceBreakdown = (where: SQL | undefined) =>
-	db
+// Postgres counts leads per stored source; the few resulting rows are folded into the six lead
+// sources with the same leadSourceOf() the badges use, so the bars and the rows always agree.
+async function sourceBreakdown(where: SQL | undefined): Promise<SourceBreakdown> {
+	const rows = await db
 		.select({
 			source: ctaClicks.trafficSource,
 			channel: ctaClicks.trafficChannel,
-			clicks: count()
+			leads: count()
 		})
 		.from(ctaClicks)
 		.where(where)
-		.groupBy(ctaClicks.trafficSource, ctaClicks.trafficChannel)
-		.orderBy(desc(count()), ctaClicks.trafficSource)
-		.limit(BREAKDOWN_LIMIT);
+		.groupBy(ctaClicks.trafficSource, ctaClicks.trafficChannel);
+
+	const groups = new Map(
+		LEAD_SOURCES.map((key) => [key, { leads: 0, details: new Map<string, number>() }])
+	);
+	let other = 0;
+	let unknown = 0;
+	for (const row of rows) {
+		if (!row.source) {
+			unknown += row.leads;
+			continue;
+		}
+		const match = leadSourceOf(row.source, row.channel);
+		if (!match) {
+			other += row.leads;
+			continue;
+		}
+		const group = groups.get(match.key)!;
+		group.leads += row.leads;
+		const detail = match.detail ?? 'Organic';
+		group.details.set(detail, (group.details.get(detail) ?? 0) + row.leads);
+	}
+
+	const items = LEAD_SOURCES.map((key) => {
+		const group = groups.get(key)!;
+		return {
+			key,
+			leads: group.leads,
+			details: [...group.details]
+				.map(([label, leads]) => ({ label, leads }))
+				.sort((a, b) => b.leads - a.leads)
+		};
+	}).sort((a, b) => b.leads - a.leads); // stable: ties keep the fixed order
+	return {
+		items,
+		attributed: items.reduce((sum, item) => sum + item.leads, 0),
+		other,
+		unknown
+	};
+}
 
 /** All-time and today's lead counts per site, for the sidebar. */
 export async function getSiteCounts(timeZone: string): Promise<SiteCounts> {

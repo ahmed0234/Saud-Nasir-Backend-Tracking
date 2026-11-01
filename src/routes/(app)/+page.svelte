@@ -3,8 +3,7 @@
 	import { showDeleted } from '#lib/components/dashboard/deleted-pop.svelte';
 	import LeadRow from '#lib/components/dashboard/lead-row.svelte';
 	import PageHeader from '#lib/components/dashboard/page-header.svelte';
-	import RankedList from '#lib/components/dashboard/ranked-list.svelte';
-	import TrafficSourceLabel from '#lib/components/dashboard/traffic-source-label.svelte';
+	import LeadSourcesCard from '#lib/components/dashboard/lead-sources-card.svelte';
 	import InstallStatus from '#lib/components/dashboard/install-status.svelte';
 	import { openWebsiteDialog } from '#lib/components/dashboard/website-dialog.svelte';
 	import SiteBadge from '#lib/components/dashboard/site-badge.svelte';
@@ -131,12 +130,6 @@
 
 	const site = $derived(findWebsite(data.websites, data.site));
 	const summary = $derived(data.dashboard?.summary);
-	const sources = $derived(
-		(data.dashboard?.sources ?? []).map((row) => ({
-			...row,
-			key: `${row.source ?? ''}|${row.channel ?? ''}`
-		}))
-	);
 	const recent = $derived((data.dashboard?.recent ?? []).filter((lead) => !removed.has(lead.id)));
 	// Only rows still on screen count as selected (a refresh can drop older ones off the list).
 	const selectedLeads = $derived(recent.filter((lead) => selected.has(lead.id)));
@@ -294,18 +287,12 @@
 			</StatCard>
 		</div>
 
-		{#if summary.total > 0}
+		{#if summary.total > 0 && data.dashboard}
 			<div class={cn('transition-opacity', refreshing && 'opacity-60')}>
-				<RankedList
-					title="Lead sources"
-					description="Where each lead's visitor came from (ad platform, search, social, AI, referral or direct), all time"
-					items={sources}
-					total={summary.total}
-				>
-					{#snippet label(item)}
-						<TrafficSourceLabel source={item.source} channel={item.channel} />
-					{/snippet}
-				</RankedList>
+				<LeadSourcesCard
+					breakdown={data.dashboard.sources}
+					description="Where each lead's visitor came from, all time"
+				/>
 			</div>
 		{/if}
 

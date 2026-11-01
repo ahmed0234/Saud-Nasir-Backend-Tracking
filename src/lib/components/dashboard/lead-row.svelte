@@ -3,14 +3,15 @@
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { Checkbox } from '#lib/components/ui/checkbox/index.js';
 	import HeaderCtaBadge from '#lib/components/dashboard/header-cta-badge.svelte';
-	import TrafficSourceBadge from '#lib/components/dashboard/traffic-source-badge.svelte';
+	import LeadSourceBadge from '#lib/components/dashboard/lead-source-badge.svelte';
 	import { formatDateTime, formatUtc, splitUrl } from '#lib/format.ts';
 	import {
 		campaignDetails,
 		campaignSummary,
 		leadOrigin,
 		sourceCtaSummary,
-		trafficSourceOf
+		trafficSourceOf,
+		trafficSourceSummary
 	} from '#lib/lead-attribution.ts';
 	import type { RecentClick } from '#lib/server/analytics.ts';
 	import { buttonTypeLabel, EVENT_TYPE_LABELS, findWebsite, isEventType } from '#lib/sites.ts';
@@ -74,7 +75,8 @@
 	const trafficTitle = $derived(
 		traffic
 			? [
-					`Source: ${traffic.source}${traffic.channelLabel ? ` · ${traffic.channelLabel}` : ''}`,
+					`Lead source: ${trafficSourceSummary(lead)}`,
+					`Recorded as: ${traffic.source}${traffic.channelLabel ? ` · ${traffic.channelLabel}` : ''}`,
 					lead.referrer && `Came from: ${lead.referrer}`,
 					lead.landingPageUrl && `Landing page: ${lead.landingPageUrl}`,
 					...campaignDetails(lead).map((detail) => `${detail.label}: ${detail.value}`)
@@ -147,7 +149,7 @@
 					class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
 				>
 					{#if traffic}
-						<TrafficSourceBadge
+						<LeadSourceBadge
 							source={lead.trafficSource}
 							channel={lead.trafficChannel}
 							title={trafficTitle}

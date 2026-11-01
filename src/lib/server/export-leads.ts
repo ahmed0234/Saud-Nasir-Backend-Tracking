@@ -1,6 +1,6 @@
 import { and, asc, eq, gte, lt } from 'drizzle-orm';
-import { leadOrigin, trafficSourceOf } from '#lib/lead-attribution.ts';
-import { SOURCE_NOT_RECORDED } from '#lib/traffic-source.ts';
+import { leadOrigin, leadSourceOfLead, trafficSourceOf } from '#lib/lead-attribution.ts';
+import { LEAD_SOURCE_LABELS } from '#lib/traffic-source.ts';
 import { buttonTypeLabel, CAMPAIGN_FIELDS, EVENT_TYPE_LABELS, isEventType } from '#lib/sites.ts';
 import { db } from './db/index.ts';
 import { ctaClicks } from './db/schema.ts';
@@ -25,6 +25,8 @@ const COLUMNS = [
 	'Page URL',
 	'City',
 	'State / Region',
+	'Lead Source',
+	'Lead Source Detail',
 	'Traffic Source',
 	'Traffic Channel',
 	'Came From (Referrer)',
@@ -90,7 +92,9 @@ export function leadsToCsv(
 			row.pageUrl,
 			row.city,
 			row.state,
-			trafficSourceOf(row)?.source ?? SOURCE_NOT_RECORDED,
+			leadSource(row)?.label,
+			leadSource(row)?.detail,
+			trafficSourceOf(row)?.source,
 			trafficSourceOf(row)?.channelLabel,
 			row.referrer,
 			row.landingPageUrl,
@@ -128,4 +132,9 @@ function hostOf(url: string): string {
 	} catch {
 		return '';
 	}
+}
+
+function leadSource(row: { trafficSource: string | null; trafficChannel: string | null }) {
+	const match = leadSourceOfLead(row);
+	return match && { label: LEAD_SOURCE_LABELS[match.key], detail: match.detail };
 }

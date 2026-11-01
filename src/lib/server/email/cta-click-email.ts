@@ -74,13 +74,14 @@ export function renderCtaClickEmail(click: CtaClickEmailDetails, { test = false 
 		`${test ? '[Test] ' : ''}New ${leadType.toLowerCase()} · ${siteName}: ${path}${location ? ` · ${location}` : ''}`
 	);
 
+	const sourceSummary = trafficSourceSummary(click);
 	const rows: Row[] = [
 		{ label: 'Page URL', value: click.pageUrl, href: click.pageUrl },
 		{ label: 'Website', value: `${siteName} (${url.host})` },
 		{ label: 'Lead type', value: leadType },
 		{ label: isForm ? 'Submit button' : 'Button', value: button || NOT_AVAILABLE },
 		...(isForm ? [{ label: 'Form', value: click.formName ?? NOT_AVAILABLE }] : []),
-		{ label: 'Traffic source', value: trafficSourceSummary(click) },
+		...(sourceSummary ? [{ label: 'Lead source', value: sourceSummary }] : []),
 		...(click.referrer ? [{ label: 'Came from', value: click.referrer, mono: true }] : []),
 		...(click.landingPageUrl
 			? [{ label: 'Landing page', value: click.landingPageUrl, href: click.landingPageUrl }]

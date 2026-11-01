@@ -9,7 +9,7 @@
 	import { placementLabel } from '#lib/lead-attribution.ts';
 	import PageHeader from '#lib/components/dashboard/page-header.svelte';
 	import RankedList from '#lib/components/dashboard/ranked-list.svelte';
-	import TrafficSourceLabel from '#lib/components/dashboard/traffic-source-label.svelte';
+	import LeadSourcesCard from '#lib/components/dashboard/lead-sources-card.svelte';
 	import InstallStatus from '#lib/components/dashboard/install-status.svelte';
 	import SiteBadge from '#lib/components/dashboard/site-badge.svelte';
 	import StatCard from '#lib/components/dashboard/stat-card.svelte';
@@ -326,19 +326,10 @@
 				</div>
 
 				<div class="grid gap-6 lg:grid-cols-2" data-stagger>
-					<RankedList
-						title="Lead sources"
-						description="Where each lead's visitor came from: ad platform, search, social, AI, referral or direct"
-						items={analytics.sources.map((row) => ({
-							...row,
-							key: `${row.source ?? ''}|${row.channel ?? ''}`
-						}))}
-						total={summary.total}
-					>
-						{#snippet label(item)}
-							<TrafficSourceLabel source={item.source} channel={item.channel} />
-						{/snippet}
-					</RankedList>
+					<LeadSourcesCard
+						breakdown={analytics.sources}
+						description="Where each lead's visitor came from, in this range"
+					/>
 					<RankedList
 						title="Campaigns"
 						description="UTM source / medium, or the ad network for auto-tagged ad clicks"
