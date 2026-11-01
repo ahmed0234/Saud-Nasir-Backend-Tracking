@@ -65,10 +65,8 @@
 	},
 	"dependencies": {
 		"@neondatabase/serverless": "^1.2.0",
-		"@vercel/functions": "^3.10.4",
 		"drizzle-orm": "^0.45.4",
-		"mode-watcher": "^1.1.0",
-		"nodemailer": "^10.2.1"
+		"mode-watcher": "^1.1.0"
 	},
 	"engines": {
 		"node": "24.x"

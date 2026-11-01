@@ -1,6 +1,5 @@
 import { db } from '#lib/server/db/index.ts';
 import { ctaClicks } from '#lib/server/db/schema.ts';
-import { sendCtaClickNotification } from '#lib/server/email/index.ts';
 import { geoFromHeaders } from '#lib/server/geo.ts';
 import { createRateLimiter } from '#lib/server/rate-limit.ts';
 import {
@@ -21,7 +20,6 @@ import {
 	type Website
 } from '#lib/sites.ts';
 import { classifyTrafficSource } from '#lib/traffic-source.ts';
-import { waitUntil } from '@vercel/functions';
 import type { RequestHandler } from './$types';
 
 // Tracking endpoint for every registered website. Who may send is decided here, on the server,
@@ -57,8 +55,8 @@ const MAX_CLOCK_SKEW_FUTURE_MS = 5 * 60_000;
 // covers clock differences and slow form plugins.
 const MAX_SOURCE_AGE_MS = 35 * 60_000;
 
-// Each accepted lead writes a row and sends an email, so cap leads per visitor IP (a real visitor
-// never makes 30 a minute) and per website (one site can't flood the database or Gmail quota).
+// Each accepted lead writes a row, so cap leads per visitor IP (a real visitor never makes 30 a
+// minute) and per website (one site can't flood the database).
 // Install pings write nothing but "last seen", so they have their own, looser per-IP limit.
 // Per function instance, best effort (see rate-limit.ts).
 const leadsPerIp = createRateLimiter({ limit: 30, windowMs: 60_000 });
@@ -436,28 +434,17 @@ export const POST: RequestHandler = async ({ request, getClientAddress }) => {
 		throw error;
 	}
 
-	let click: typeof ctaClicks.$inferSelect;
 	try {
 		// The database has the final say on "enabled and owns this domain" (the cache can be up to a
 		// minute old on other instances), and this also records the website as seen.
 		if (!(await touchWebsite(website.key, pageUrl.hostname, pageUrl.href))) {
 			return json({ error: 'Website is disabled' }, 403, headers);
 		}
-		[click] = await db.insert(ctaClicks).values(values).returning();
+		await db.insert(ctaClicks).values(values);
 	} catch (error) {
 		console.error('Failed to record CTA click', error);
 		return json({ error: 'Failed to record event' }, 500, headers);
 	}
-
-	// Respond immediately; Vercel keeps the function alive until the email settles.
-	waitUntil(
-		sendCtaClickNotification({
-			...click,
-			siteName: website.name,
-			country: geo.country,
-			userAgent: request.headers.get('user-agent')?.slice(0, 300) ?? null
-		})
-	);
 
 	return new Response(null, { status: 204, headers });
 };

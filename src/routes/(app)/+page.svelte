@@ -19,8 +19,6 @@
 	import ClipboardListIcon from '@lucide/svelte/icons/clipboard-list';
 	import CodeIcon from '@lucide/svelte/icons/code';
 	import InboxIcon from '@lucide/svelte/icons/inbox';
-	import Loader2Icon from '@lucide/svelte/icons/loader-2';
-	import MailIcon from '@lucide/svelte/icons/mail';
 	import MousePointerClickIcon from '@lucide/svelte/icons/mouse-pointer-click';
 	import RefreshCwIcon from '@lucide/svelte/icons/refresh-cw';
 	import ServerCrashIcon from '@lucide/svelte/icons/server-crash';
@@ -28,7 +26,6 @@
 	import Trash2Icon from '@lucide/svelte/icons/trash-2';
 	import UsersIcon from '@lucide/svelte/icons/users';
 	import XIcon from '@lucide/svelte/icons/x';
-	import { enhance } from '$app/forms';
 	import { refreshAll } from '$app/navigation';
 	import { resolve } from '$app/paths';
 	import type { ActionResult } from '$app/forms';
@@ -42,7 +39,6 @@
 	let { data }: PageProps = $props();
 
 	let refreshing = $state(false);
-	let sendingTest = $state(false);
 
 	// Selection and deletion. Deleted rows are hidden as soon as the server confirms (playing their
 	// exit animation), before the refresh that updates the stats and sidebar counts lands.
@@ -168,39 +164,6 @@
 			{#if site}<InstallStatus website={site} timeZone={data.timeZone} />{/if}
 		{/snippet}
 		{#snippet actions()}
-			<form
-				method="POST"
-				action="?/sendTestEmail"
-				use:enhance={() => {
-					sendingTest = true;
-					return async ({ result }) => {
-						sendingTest = false;
-						if (result.type === 'success') {
-							toast.success('Test email sent', { description: String(result.data?.message ?? '') });
-						} else if (result.type === 'failure') {
-							toast.error('Test email failed', { description: String(result.data?.message ?? '') });
-						} else if (result.type === 'error') {
-							toast.error('Test email failed', { description: 'Unexpected server error.' });
-						}
-					};
-				}}
-			>
-				<Button
-					type="submit"
-					variant="outline"
-					class="glass"
-					disabled={sendingTest}
-					aria-busy={sendingTest}
-				>
-					{#if sendingTest}
-						<Loader2Icon class="animate-spin" />
-						Sending…
-					{:else}
-						<MailIcon />
-						Send test email
-					{/if}
-				</Button>
-			</form>
 			<Button
 				variant="outline"
 				class="glass"

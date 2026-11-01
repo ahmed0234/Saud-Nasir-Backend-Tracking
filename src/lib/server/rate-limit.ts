@@ -1,7 +1,7 @@
 /**
  * Fixed-window, in-memory rate limiter keyed by client IP. On Vercel each function instance has
- * its own memory, so this is best-effort: it stops a single script from flooding the database
- * and the Gmail quota, but a determined distributed attacker needs a Vercel Firewall rule.
+ * its own memory, so this is best-effort: it stops a single script from flooding the database,
+ * but a determined distributed attacker needs a Vercel Firewall rule.
  */
 export function createRateLimiter({ limit, windowMs }: { limit: number; windowMs: number }) {
 	const hits = new Map<string, { count: number; resetAt: number }>();

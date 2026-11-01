@@ -1,7 +1,7 @@
 // Where a lead's visitor came from, worked out on the server from what the tracker captured on
 // the landing page (UTM parameters, ad click IDs, the referring site). Classified once, when the
-// lead is recorded, and stored in cta_clicks.traffic_source / traffic_channel, so the dashboard,
-// the CSV and the email all agree. Update the rules here; every website picks them up for new
+// lead is recorded, and stored in cta_clicks.traffic_source / traffic_channel, so the dashboard
+// and the CSV agree. Update the rules here; every website picks them up for new
 // leads without touching its tracking code.
 
 export const TRAFFIC_CHANNELS = [
@@ -411,8 +411,8 @@ export type LeadSourceMatch = {
 
 /**
  * The lead source (one of the six) for a stored traffic source / channel, or null when the lead
- * has no source data or came from somewhere outside the six. Pure, so the dashboard, the CSV and
- * the email always agree.
+ * has no source data or came from somewhere outside the six. Pure, so the dashboard and the CSV
+ * always agree.
  */
 export function leadSourceOf(
 	source: string | null,

@@ -14,8 +14,6 @@ export default defineConfig({
 				runes: ({ filename }) =>
 					filename.split(/[/\\]/).includes('node_modules') ? undefined : true
 			},
-			// Covers the slowest path: a notification or test email whose first SMTP connection
-			// fails and is retried (two attempts of up to ~30s each).
 			adapter: adapter({ runtime: 'nodejs24.x', maxDuration: 60 }),
 			csrf: {
 				// SvelteKit's built-in check only knows origins listed at build time, but registered

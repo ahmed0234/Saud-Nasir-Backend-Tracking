@@ -381,9 +381,7 @@
 							{#if errors.name}
 								<p id="website-name-error" class="text-xs text-destructive">{errors.name}</p>
 							{:else}
-								<p class="text-xs text-muted-foreground">
-									Shown in the sidebar and in lead emails.
-								</p>
+								<p class="text-xs text-muted-foreground">Shown in the sidebar and on leads.</p>
 							{/if}
 						</div>
 

@@ -14,7 +14,7 @@ import {
 	type TrafficChannel
 } from './traffic-source.ts';
 
-// Human-readable attribution for a lead, shared by the dashboard, the CSV export and the email.
+// Human-readable attribution for a lead, shared by the dashboard and the CSV export.
 
 export type LeadAttribution = Campaign & {
 	eventType: string;
@@ -97,7 +97,7 @@ export function trafficSourceSummary(lead: LeadTraffic): string | null {
 		: traffic.source;
 }
 
-/** Every campaign value present, labelled (for tooltips and emails). */
+/** Every campaign value present, labelled (for tooltips). */
 export function campaignDetails(campaign: Campaign): { label: string; value: string }[] {
 	return CAMPAIGN_FIELDS.flatMap(({ key, label }) => {
 		const value = campaign[key];
