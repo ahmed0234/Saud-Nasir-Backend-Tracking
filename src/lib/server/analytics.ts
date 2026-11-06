@@ -44,17 +44,13 @@ export type RecentClick = Campaign & {
 
 /**
  * Leads per lead source (always all six, most leads first), each split by what's inside it
- * (Organic: Google search / Direct visit, AI: ChatGPT / Perplexity, ...). Shares are of
- * `attributed`; leads from other sources (Google Ads, email, other websites) and leads without
- * source data are only counted, never shown as a category.
+ * (Organic: Google search / Direct visit, AI: ChatGPT / Perplexity, ...). Every lead is counted
+ * exactly once: leads that match none of the six (Google Ads, email, other websites, no source
+ * data) are reported under Organic, so `total` always equals the lead count of the same filter.
  */
 export type SourceBreakdown = {
 	items: { key: LeadSource; leads: number; details: { label: string; leads: number }[] }[];
-	attributed: number;
-	/** Leads with a known source outside the six. */
-	other: number;
-	/** Leads without source data (recorded before source tracking, or by an old snippet). */
-	unknown: number;
+	total: number;
 };
 
 export type Bucket = { start: string; clicks: number };
@@ -91,6 +87,8 @@ export type SiteCounts = { site: string | null; total: number; today: number }[]
 
 export const RECENT_LIMIT = 50;
 const BREAKDOWN_LIMIT = 10;
+/** The part of Organic that is leads matching none of the six sources. */
+const UNMATCHED_DETAIL = 'Other & untracked';
 
 const localMidnight = (timeZone: string) =>
 	sql`(date_trunc('day', now() at time zone ${timeZone}) at time zone ${timeZone})`;
@@ -120,7 +118,8 @@ const campaignLabel = sql<string>`coalesce(
 )`;
 
 // Postgres counts leads per stored source; the few resulting rows are folded into the six lead
-// sources with the same leadSourceOf() the badges use, so the bars and the rows always agree.
+// sources with the same leadSourceOf() the badges use. Leads matching none of them are added to
+// Organic here, at read time only: the stored rows, their badges and the CSV keep their own source.
 async function sourceBreakdown(where: SQL | undefined): Promise<SourceBreakdown> {
 	const rows = await db
 		.select({
@@ -135,22 +134,22 @@ async function sourceBreakdown(where: SQL | undefined): Promise<SourceBreakdown>
 	const groups = new Map(
 		LEAD_SOURCES.map((key) => [key, { leads: 0, details: new Map<string, number>() }])
 	);
-	let other = 0;
-	let unknown = 0;
+	let unmatched = 0;
 	for (const row of rows) {
-		if (!row.source) {
-			unknown += row.leads;
-			continue;
-		}
 		const match = leadSourceOf(row.source, row.channel);
 		if (!match) {
-			other += row.leads;
+			unmatched += row.leads;
 			continue;
 		}
 		const group = groups.get(match.key)!;
 		group.leads += row.leads;
 		const detail = match.detail ?? 'Organic';
 		group.details.set(detail, (group.details.get(detail) ?? 0) + row.leads);
+	}
+	if (unmatched > 0) {
+		const organic = groups.get('organic')!;
+		organic.leads += unmatched;
+		organic.details.set(UNMATCHED_DETAIL, unmatched);
 	}
 
 	const items = LEAD_SOURCES.map((key) => {
@@ -163,12 +162,7 @@ async function sourceBreakdown(where: SQL | undefined): Promise<SourceBreakdown>
 				.sort((a, b) => b.leads - a.leads)
 		};
 	}).sort((a, b) => b.leads - a.leads); // stable: ties keep the fixed order
-	return {
-		items,
-		attributed: items.reduce((sum, item) => sum + item.leads, 0),
-		other,
-		unknown
-	};
+	return { items, total: items.reduce((sum, item) => sum + item.leads, 0) };
 }
 
 /** All-time and today's lead counts per site, for the sidebar. */

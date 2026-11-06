@@ -7,7 +7,7 @@
 	import { LEAD_SOURCE_STYLES } from './lead-source-style.ts';
 
 	// "Lead sources": the six sources as a share bar and one row each, always all six in the same
-	// colours as the lead badges. Shares are of the leads with a known source among the six.
+	// colours as the lead badges. Shares are of all leads, so the six add up to the total.
 	let {
 		breakdown,
 		description,
@@ -16,8 +16,7 @@
 
 	const headingId = $props.id();
 	const max = $derived(Math.max(1, ...breakdown.items.map((item) => item.leads)));
-	const shareOf = (leads: number) =>
-		breakdown.attributed === 0 ? 0 : leads / breakdown.attributed;
+	const shareOf = (leads: number) => (breakdown.total === 0 ? 0 : leads / breakdown.total);
 	const segments = $derived(breakdown.items.filter((item) => item.leads > 0));
 
 	const HINTS = {
@@ -36,18 +35,6 @@
 		}
 		return details.map((detail) => `${detail.label} ${formatNumber(detail.leads)}`).join(' · ');
 	}
-
-	const note = $derived.by(() => {
-		const parts: string[] = [];
-		if (breakdown.other > 0) {
-			parts.push(`${formatNumber(breakdown.other)} from other sources (e.g. paid ads, email)`);
-		}
-		if (breakdown.unknown > 0) {
-			parts.push(`${formatNumber(breakdown.unknown)} recorded before source tracking`);
-		}
-		if (parts.length === 0) return null;
-		return `Shares are of the ${formatNumber(breakdown.attributed)} leads with a known source; ${parts.join(' and ')} aren't included.`;
-	});
 </script>
 
 <section
@@ -60,8 +47,8 @@
 			<p class="text-sm text-muted-foreground">{description}</p>
 		</div>
 		<p class="text-sm text-muted-foreground tabular-nums">
-			<span class="font-medium text-foreground">{formatNumber(breakdown.attributed)}</span>
-			{breakdown.attributed === 1 ? 'lead' : 'leads'}
+			<span class="font-medium text-foreground">{formatNumber(breakdown.total)}</span>
+			{breakdown.total === 1 ? 'lead' : 'leads'}
 		</p>
 	</header>
 
@@ -73,7 +60,7 @@
 				? segments
 						.map((item) => `${LEAD_SOURCE_LABELS[item.key]} ${formatPercent(shareOf(item.leads))}`)
 						.join(', ')
-				: 'No leads with a known source yet'}
+				: 'No leads yet'}
 		>
 			{#each segments as item (item.key)}
 				<div
@@ -136,12 +123,4 @@
 			</li>
 		{/each}
 	</ol>
-
-	{#if note || breakdown.attributed === 0}
-		<p class="border-t border-foreground/[0.06] px-5 py-3 text-xs text-muted-foreground">
-			{breakdown.attributed === 0
-				? 'No leads with a known source yet. Sources are recorded for leads sent by the current tracking script.'
-				: note}
-		</p>
-	{/if}
 </section>

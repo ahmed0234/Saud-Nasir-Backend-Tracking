@@ -374,7 +374,8 @@ export const LEAD_SOURCE_LABELS: Record<LeadSource, string> = {
 };
 
 export const LEAD_SOURCE_DESCRIPTIONS: Record<LeadSource, string> = {
-	organic: 'Google (or another search engine) search, or typed the address directly',
+	organic:
+		'Google (or another search engine) search, or typed the address directly, plus leads with no other matching source',
 	yelp: 'Yelp listing, app or Yelp-tagged links',
 	instagram: 'Instagram profile, posts, stories or ads',
 	facebook: 'Facebook page, posts, Messenger or ads',
