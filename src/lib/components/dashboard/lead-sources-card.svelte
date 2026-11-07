@@ -75,12 +75,12 @@
 		</div>
 	</div>
 
-	<ol class="grid gap-1 px-3 pt-3 pb-3 @2xl:grid-cols-2 @2xl:gap-x-4">
+	<ol class="grid grid-cols-1 gap-1 px-3 pt-3 pb-3 @2xl:grid-cols-2 @2xl:gap-x-4">
 		{#each breakdown.items as item (item.key)}
 			{@const details = detailLine(item.details)}
 			<li
 				class={cn(
-					'rounded-xl px-2 py-2.5 transition-[background-color,opacity] hover:bg-foreground/[0.04]',
+					'min-w-0 rounded-xl px-2 py-2.5 transition-[background-color,opacity] hover:bg-foreground/[0.04]',
 					item.leads === 0 && 'opacity-55'
 				)}
 				title={LEAD_SOURCE_DESCRIPTIONS[item.key]}
@@ -98,7 +98,7 @@
 						<div class="flex items-baseline justify-between gap-3">
 							<div class="min-w-0">
 								<p class="truncate text-sm font-medium">{LEAD_SOURCE_LABELS[item.key]}</p>
-								<p class="truncate text-xs text-muted-foreground">
+								<p class="line-clamp-2 text-xs break-words text-muted-foreground">
 									{details ?? HINTS[item.key]}
 								</p>
 							</div>
